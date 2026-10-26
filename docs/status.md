@@ -13,9 +13,9 @@
 | Protocol framing and version negotiation | Unit-tested and fuzzed | `tst_frame`, `tst_version`; libFuzzer ran 642,521 inputs in 60 seconds with no failures |
 | Main window and settings dialog | Implemented, automated accessibility checks | `tst_mainwindow`: accessible names on every focusable control, pane shortcuts, F6 order, settings navigation, apply and save |
 | Sanitizers | All tests pass under AddressSanitizer and UBSan | `linux-asan` preset |
-| Windows build | **Not yet verified** | The CI job is written; the result of its first run is reported on the pull request or commit |
+| Windows build | Built and unit-tested on CI | MSVC 14.44 (Visual Studio 2022), Qt 6.8.3, warnings as errors: build and all 6 test suites passed on the first CI run |
 | NVDA behaviour | **Not yet verified** | Needs a manual run of the [test script](accessibility/nvda-test-script.md) on Windows |
-| Live announcements (`QAccessibleAnnouncementEvent`) | Implemented, **compiled only on Qt 6.8 (Windows CI)** | Not testable on the local Qt 6.4 |
+| Live announcements (`QAccessibleAnnouncementEvent`) | Implemented and compiled on Qt 6.8 (Windows CI); **not yet heard with NVDA** | Not testable on the local Qt 6.4 |
 
 ## Commands that were run (Linux sandbox, Ubuntu 24.04)
 

@@ -16,7 +16,7 @@ Deliverables: [project brief](project-brief.md), [risk assessment](risk-assessme
 | M1.2 | Logging, data layout (installed, portable, custom), settings store | M1.1 | Done, unit-tested |
 | M1.3 | Main window: panes, menus, status bar, F6 and Ctrl+number navigation | M1.2 | Done, automated a11y checks |
 | M1.4 | Settings dialog: categories, apply and cancel, validation | M1.2 | Done for General, Accessibility, and Logging and Diagnostics |
-| M1.5 | CI: Windows MSVC build, tests, portable zip; Linux tests with sanitizers; fuzz smoke run | M1.1 | Written; **first Windows run pending** |
+| M1.5 | CI: Windows MSVC build, tests, portable zip; Linux tests with sanitizers; fuzz smoke run | M1.1 | Done: Windows build and tests pass |
 | M1.6 | Manual NVDA pass with the [test script](accessibility/nvda-test-script.md) | M1.5 | **Open: needs the owner or a tester on Windows** |
 | M1.7 | Visual identity: application icon, name styling, About box | — | Open |
 

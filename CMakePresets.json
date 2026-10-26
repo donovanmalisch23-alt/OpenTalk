@@ -62,6 +62,7 @@
       "name": "base",
       "hidden": true,
       "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" },
       "environment": { "QT_QPA_PLATFORM": "offscreen" }
     },
     { "name": "windows-msvc-debug", "inherits": "base", "configurePreset": "windows-msvc-debug" },

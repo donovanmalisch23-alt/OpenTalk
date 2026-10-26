@@ -19,7 +19,7 @@ cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
 ```
 
-To run the application, add `C:\Qt\6.8.3\msvc2022_64\bin` to `PATH`, or run `windeployqt` on `build\windows-msvc-debug\src\app\OpenTalk.exe`.
+To run the application, add `C:\Qt\6.8.3\msvc2022_64\bin` to `PATH`, or run `windeployqt` on `OpenTalk.exe`. With Qt 6.8 it is placed at the top of the build folder (`build\windows-msvc-debug\OpenTalk.exe`).
 
 **Portable mode:** create an empty file named `OpenTalk.portable` next to `OpenTalk.exe`. Settings and logs then go to a `data` folder beside it. You can also run `OpenTalk.exe --data-dir <folder>`.
 
