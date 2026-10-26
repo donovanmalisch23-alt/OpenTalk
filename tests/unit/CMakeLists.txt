@@ -10,6 +10,8 @@ endfunction()
 
 opentalk_add_test(tst_frame LIBS OpenTalk::Protocol)
 opentalk_add_test(tst_version LIBS OpenTalk::Protocol)
+opentalk_add_test(tst_messages LIBS OpenTalk::Protocol)
+opentalk_add_test(tst_session LIBS OpenTalk::Protocol)
 opentalk_add_test(tst_logging LIBS OpenTalk::Logging)
 opentalk_add_test(tst_apppaths LIBS OpenTalk::Storage)
 opentalk_add_test(tst_settingsstore LIBS OpenTalk::Storage)
