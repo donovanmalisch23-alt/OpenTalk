@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-only
+function(opentalk_add_test name)
+    cmake_parse_arguments(ARG "" "" "LIBS" ${ARGN})
+    qt_add_executable(${name} ${name}.cpp)
+    target_link_libraries(${name} PRIVATE Qt6::Test OpenTalk::CompilerOptions ${ARG_LIBS})
+    add_test(NAME ${name} COMMAND ${name})
+    # GUI tests run without a display on CI machines.
+    set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endfunction()
+
+opentalk_add_test(tst_frame LIBS OpenTalk::Protocol)
+opentalk_add_test(tst_version LIBS OpenTalk::Protocol)
+opentalk_add_test(tst_logging LIBS OpenTalk::Logging)
+opentalk_add_test(tst_apppaths LIBS OpenTalk::Storage)
+opentalk_add_test(tst_settingsstore LIBS OpenTalk::Storage)
+opentalk_add_test(tst_mainwindow LIBS OpenTalk::Ui)

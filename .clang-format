@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-only
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+AccessModifierOffset: -4
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: Never
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: All
+FixNamespaceComments: true
+IncludeBlocks: Preserve
+PointerAlignment: Right
+SpaceBeforeCpp11BracedList: false

@@ -1,0 +1,10 @@
+/build/
+/out/
+CMakeUserPresets.json
+.vs/
+.vscode/
+*.user
+compile_commands.json
+crash-*
+leak-*
+timeout-*

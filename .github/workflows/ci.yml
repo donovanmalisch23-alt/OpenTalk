@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: GPL-3.0-only
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows (MSVC, Qt 6.8 LTS)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        run: cmake --preset windows-msvc-release
+
+      - name: Build
+        run: cmake --build --preset windows-msvc-release
+
+      - name: Test
+        run: ctest --preset windows-msvc-release
+
+      - name: Package portable build
+        shell: pwsh
+        run: |
+          $stage = "OpenTalk-portable"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item build/windows-msvc-release/src/app/OpenTalk.exe $stage/
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw "$stage/OpenTalk.exe"
+          New-Item -ItemType File "$stage/OpenTalk.portable" | Out-Null
+          Copy-Item LICENSE "$stage/LICENSE.txt"
+          Copy-Item README.md "$stage/README.md"
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenTalk-portable-windows-x64
+          path: OpenTalk-portable
+          retention-days: 14
+
+  linux:
+    name: Linux (GCC, format, sanitizers)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev ninja-build clang-format
+
+      - name: Check formatting
+        run: find src tests -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror
+
+      - name: Build and test
+        run: |
+          cmake --preset linux-debug
+          cmake --build --preset linux-debug
+          ctest --preset linux-debug
+
+      - name: Build and test with AddressSanitizer and UBSan
+        run: |
+          cmake --preset linux-asan
+          cmake --build --preset linux-asan
+          ctest --preset linux-asan
+
+  fuzz:
+    name: Fuzz protocol parsers (smoke run)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev ninja-build clang libclang-rt-18-dev
+
+      - name: Build fuzzers
+        run: |
+          cmake --preset linux-fuzz
+          cmake --build --preset linux-fuzz
+
+      - name: Run frame decoder fuzzer for 2 minutes
+        run: |
+          mkdir -p corpus
+          build/linux-fuzz/tests/fuzz/fuzz_frame_decoder -max_total_time=120 corpus
