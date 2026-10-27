@@ -6,15 +6,16 @@
 
 | Dependency | Use | License | Notes |
 |---|---|---|---|
-| Qt 6: Core, Gui, Widgets, Test | Application framework, UI, tests | LGPL-3.0 / GPL-2.0 / GPL-3.0 (open source) | Dynamically linked. Obligations in [licensing policy](licensing/policy.md#qt). |
+| Qt 6: Core, Gui, Widgets, Network, Test | Application framework, UI, networking and TLS, tests | LGPL-3.0 / GPL-2.0 / GPL-3.0 (open source) | Dynamically linked. Obligations in [licensing policy](licensing/policy.md#qt). |
+| OpenSSL 3 | TLS 1.3 through Qt's OpenSSL backend ([ADR 0007](architecture/decisions/0007-openssl-tls-backend.md)) | Apache-2.0 | Shipped with Windows builds. Must be a supported release series before the first public release. |
 | CMake, Ninja | Build | BSD-3-Clause, Apache-2.0 | Build tools only; not shipped. |
 
 ## Candidates, by phase
 
 | Candidate | Purpose | License | Phase | Questions to verify |
 |---|---|---|---|---|
-| Qt Network (`QSslSocket`, `QDtls`) | TLS 1.3 control channel; possibly DTLS for audio | LGPL-3.0 / GPL | 2–4 | Which TLS backend Windows builds should use: Schannel (system) or OpenSSL (must be shipped). Whether `QDtls` works with Schannel; it is believed to need OpenSSL. TLS 1.3 support under Schannel on Windows 10 and 11. |
-| OpenSSL 3.x | TLS and DTLS backend if Schannel is not enough | Apache-2.0 (GPLv3-compatible) | 2–4 | Update process for security fixes; size. |
+| Qt Network `QDtls` | Possibly DTLS for audio | LGPL-3.0 / GPL | 4 | DTLS 1.3 support; behaviour on Windows with the OpenSSL backend. |
+| OpenSSL 3.5 LTS | Supported OpenSSL for release packages | Apache-2.0 | 8 | Trusted, pinned binary source or a build from source (vcpkg). |
 | Opus (libopus) | Voice codec | BSD-3-Clause, plus a royalty-free patent licence | 4 | Build from source with pinned version via vcpkg or FetchContent; licence notice text. |
 | miniaudio | Audio I/O backend (WASAPI, including loopback; also CoreAudio and PulseAudio/ALSA later) | Public domain (Unlicense) or MIT-0 | 4 | Compare latency and hot-plug with Qt Multimedia and raw WASAPI in the Phase 4 spike. |
 | Qt Multimedia | Alternative audio I/O; media decoding for the media player | LGPL-3.0 / GPL | 4/7 | Windows builds use an FFmpeg backend; check that the shipped FFmpeg build is LGPL and which codecs it contains. |

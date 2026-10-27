@@ -1,6 +1,6 @@
 # ADR 0005: TLS/TCP control channel with CBOR; separate UDP audio
 
-**Status:** Provisional (needs a Phase 2 prototype and a Phase 4 audio-encryption decision)
+**Status:** Control channel accepted and implemented in Phase 2. The audio part stays provisional until the Phase 4 audio-encryption decision.
 
 **Context:** Control messages must be reliable and ordered. Voice must be low latency, and a lost packet is better than a late one. Everything must be encrypted with standard protocols.
 

@@ -1,6 +1,6 @@
 # NVDA manual test script
 
-Run this on every release candidate with NVDA (latest stable release, default settings) on Windows 11. Record the date, the NVDA and OpenTalk versions, and pass or fail with notes for each step in the release issue.
+Run this on every release candidate with NVDA (latest stable release, default settings) on Windows 10 and on Windows 11. Record the date, the NVDA and OpenTalk versions, and pass or fail with notes for each step in the release issue.
 
 ## Setup
 

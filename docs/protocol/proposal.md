@@ -1,6 +1,6 @@
-# Protocol proposal (version 1, provisional)
+# Protocol specification (version 1, in progress)
 
-**Status:** Framing and version negotiation are implemented, unit-tested and fuzzed (`src/protocol`). Everything else here is designed. See [ADR 0005](../architecture/decisions/0005-transport-and-serialization.md).
+**Status:** The control channel's transport (TLS 1.3), framing, session messages, handshake, heartbeats, timeouts, rate limiting and errors are **implemented, unit-tested, integration-tested over TLS and fuzzed** (`src/protocol`, `src/client`, `src/server`). Authentication, channels, text and audio are **designed**. See [ADR 0005](../architecture/decisions/0005-transport-and-serialization.md) and [ADR 0007](../architecture/decisions/0007-openssl-tls-backend.md).
 
 ## Goals
 
@@ -54,7 +54,8 @@ Client                                   Server
   │── Goodbye ─► (or connection close)     │
 ```
 
-- **Version negotiation:** the client sends a range and the server answers with one version. The client rejects any version outside its own range, which prevents silent downgrades. Implemented as `negotiateVersion`.
+- **Version negotiation:** the client sends a range and the server answers with one version. The client rejects any version outside its own range, which prevents silent downgrades. **Implemented.**
+- **Authentication** (Phase 3) will follow Welcome. In protocol version 1 as implemented today there is no login yet, so every connection is anonymous.
 - **Requests and responses:** every client request carries a `requestId` (an unsigned integer chosen by the client), and the response echoes it. Server-initiated events have no `requestId`.
 - **State machine:** the server accepts only the messages valid in the current session state (for example nothing but `Hello` before `Hello`). Anything else gets `Error{ProtocolViolation}` and the connection is closed.
 - **Reconnection:** the client retries with exponential backoff (1, 2, 4 … up to 30 seconds, with jitter). A short-lived resume token from `AuthResult` lets it rejoin its channel without asking for the password again.
@@ -72,11 +73,42 @@ Client                                   Server
 | 0x0600–0x06FF | Server management and monitoring |
 | 0x7000–0x7FFF | Reserved for experiments; never used in releases |
 
-Unknown message types get `Error{UnknownMessage}` but the connection is **not** closed, so newer clients stay compatible as long as framing is intact.
+Unknown message types get `Error{UnknownMessage}` but the connection is **not** closed, so newer clients stay compatible as long as framing is intact. Before the handshake completes, an unknown type closes the connection.
+
+## Session messages (implemented)
+
+Payloads are CBOR maps with small integer keys. Keys are scoped to each message type. Receivers ignore keys they do not know. Every field below is required unless marked optional.
+
+| Type | Name | Direction | Fields (key: name, type) |
+|---|---|---|---|
+| 0x0001 | Hello | client → server | 1: min version (u16 ≥ 1), 2: max version (u16 ≥ min), 3: client name (text), 4: client version (text) |
+| 0x0002 | Welcome | server → client | 1: chosen version (u16), 2: server name (text), 3: server version (text), 4: max payload size the server accepts (u32 ≥ 1024), 5: heartbeat interval in seconds (u16 ≥ 1) |
+| 0x0003 | Ping | either | 1: token (unsigned, 63 bits) |
+| 0x0004 | Pong | either | 1: token copied from the Ping |
+| 0x0005 | Goodbye | either | 1: reason (error code, 0 = normal) |
+| 0x0006 | Error | either | 1: code (u16), 2: request ID (optional, unsigned), 3: detail (text, may be empty) |
+
+**Text rules:** names are 1–128 UTF-16 code units and not blank. Detail text is at most 1024. Control and invisible formatting characters (for example U+202E, which reverses text direction) are rejected, so a hostile peer cannot hide or disguise text shown to users or written to logs.
+
+**Session rules:**
+
+| Rule | Value (default) |
+|---|---|
+| Server waits for Hello after TLS | 10 s, then Error{Timeout} and close |
+| Client waits for Welcome | 10 s |
+| Heartbeat | The client pings every heartbeat interval announced in Welcome (15 s) |
+| Server idle timeout | 45 s without any data: Goodbye{Timeout} and close |
+| Client timeout | 3 heartbeat intervals without any data |
+| Rate limit (server) | Token bucket: 50 messages per second sustained, bursts of 100; above that, Error{RateLimited} and close |
+| Connection limits (server) | 200 sessions in total (configurable, extra clients get Goodbye{ServerFull}); 10 connections per IP address (extra ones dropped before TLS) |
+| TLS handshake timeout (server) | 10 s |
+| Shutdown | Server sends Goodbye{ServerShuttingDown} to everyone, waits up to 3 s, then closes |
+
+**Error and Goodbye codes:** 0 None, 1 ProtocolViolation, 2 UnsupportedVersion, 3 UnknownMessage, 4 MalformedMessage, 5 RateLimited, 6 ServerFull, 7 Timeout, 8 ServerShuttingDown, 9 InternalError. Codes are never renumbered. Unknown codes from newer peers are treated as InternalError. Further codes (authentication, permissions) arrive with the features that need them.
 
 ## Errors
 
-Each `Error` has a numeric `code`, the `requestId` it answers (if any), and a short English `detail` meant for logs. The client builds its user-facing, translatable text from the code. Initial codes: `ProtocolViolation`, `UnsupportedVersion`, `UnknownMessage`, `MalformedMessage`, `AuthenticationFailed`, `NotAuthorized`, `NotFound`, `ChannelFull`, `WrongChannelPassword`, `RateLimited`, `ServerFull`, `Banned` (with expiry if temporary), `InternalError`.
+Each `Error` has a numeric `code`, the `requestId` it answers (if any), and a short English `detail` meant for logs. The client builds its user-facing, translatable text from the code. The implemented codes are listed above. Planned additions: `AuthenticationFailed`, `NotAuthorized`, `NotFound`, `ChannelFull`, `WrongChannelPassword`, `Banned` (with expiry if temporary).
 
 ## Audio packets (designed)
 

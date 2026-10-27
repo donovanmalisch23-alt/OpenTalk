@@ -2,7 +2,7 @@
 
 Accessibility blocks releases. A regression in any criterion below is a release-blocking bug.
 
-**Primary target:** NVDA (current stable release) on Windows 11 with the OpenTalk Windows build (Qt 6.8 LTS or later). **Secondary target:** Windows Narrator. **Later:** Orca on Linux, VoiceOver on macOS.
+**Primary target:** NVDA (current stable release) on Windows 10 and Windows 11 with the OpenTalk Windows build (Qt 6.8 LTS or later). **Secondary target:** Windows Narrator. **Later:** Orca on Linux, VoiceOver on macOS.
 
 Qt exposes widgets to screen readers through **UI Automation** on Windows. Standard widgets are used wherever possible. A custom accessibility interface is written only when NVDA testing shows that a standard one is not enough.
 

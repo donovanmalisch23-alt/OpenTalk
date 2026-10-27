@@ -10,13 +10,13 @@ Status uses the legend in [docs/README.md](../README.md).
 |---|---|---|---|---|
 | Logging | `src/logging` | Log categories per component, file and stderr output, runtime level, single-line format. | QtCore | Implemented, unit-tested |
 | Storage | `src/storage` | Data-folder layout (installed, portable or custom), typed settings schema, validated atomic settings store, migrations. Later: server database (SQLite) and backups. | QtCore, Logging | Implemented, unit-tested |
-| Protocol | `src/protocol` | Wire format: framing, version negotiation. Later: CBOR message schemas, error codes, audio packet format. | QtCore only | Framing and versioning implemented, unit-tested, fuzzed |
+| Protocol | `src/protocol` | Wire format and rules: framing, version negotiation, CBOR session messages, client and server session state machines (handshake, heartbeats, timeouts, rate limits). No I/O. Later: channel, text and audio messages. | QtCore only | Implemented, unit-tested, fuzzed |
 | UI | `src/ui` | Qt Widgets: main window, settings dialog, accessibility helpers. Presentation only; no network or audio logic. | QtWidgets, Storage, Logging | Implemented, automated a11y checks |
 | App | `src/app` | Entry point. Composes the components, parses the command line, owns their lifetimes. | All of the above | Implemented |
-| Client | `src/client` | Session state machine, reconnection, channel and user models, text messages. | Protocol, Security, Audio | Designed (Phase 3) |
-| Server | `src/server` | Listener, sessions, channel tree, authorization, persistence, headless entry point `opentalk-server`. | Protocol, Security, Moderation, Storage | Designed (Phase 3) |
-| SDK | `src/sdk` | Stable public C++ API over Client (and later admin operations); semantic versioning; examples. | Client, Protocol | Designed (Phase 2/3) |
-| Security | `src/security` | TLS configuration, certificate pinning, Argon2id hashing (libsodium), secure local secret storage (Windows Credential Manager behind an interface). | QtNetwork, libsodium | Designed |
+| Client | `src/client` | `Connection`: TLS socket plus `ClientSession`, certificate trust, connect timeout. Later: reconnection, channel and user models, text. | Protocol, Security | Connection implemented and integration-tested; the rest is Phase 3 |
+| Server | `src/server` | TLS listener, per-client sessions, connection limits, graceful shutdown, and the headless `opentalk-server` program. Later: accounts, channels, authorization, persistence. | Protocol, Security | Listener and sessions implemented and integration-tested; the rest is Phase 3+ |
+| SDK | `src/sdk` | Stable public C++ API over Client; semantic versioning; [guide](../sdk/README.md); `examples/opentalk-ping`. | Client | Draft 0.1 implemented, tested through the example |
+| Security | `src/security` | TLS 1.3 setup with the OpenSSL backend ([ADR 0007](decisions/0007-openssl-tls-backend.md)), certificate fingerprints, pinning decisions. Later: Argon2id hashing (libsodium), secure local secret storage. | QtNetwork | TLS and pinning implemented and tested |
 | Audio | `src/audio` | `AudioBackend` interface (capture, playback, device events), Opus codec, jitter buffer, mixer, processing chain. Real-time thread rules below. | Opus, backend library | Designed (Phase 4) |
 | Moderation | `src/moderation` | Roles, capabilities, permission resolution, sanctions, audit log, appeals. Pure logic with no networking, so it can be exhaustively unit tested. | QtCore, Storage | Designed (Phase 5) |
 | Plugins | `src/plugins` | Manifest parsing, discovery, lifecycle, plugin host process and IPC, capability grants. | Protocol, Storage | Designed (Phase 6) |
@@ -25,7 +25,7 @@ Status uses the legend in [docs/README.md](../README.md).
 
 ```
 app ─► ui ─► client ─► protocol
- │      │      ├─────► audio
+ │      │      ├─────► audio (Phase 4)
  │      │      └─────► security
  │      └────► storage ─► logging
  └────► server ─► moderation ─► storage
@@ -77,10 +77,13 @@ OpenTalk/
 ├── src/<component>/                     One static library per component
 │   ├── include/opentalk/<component>/    Public headers of that component
 │   └── *.cpp                            Implementation (private)
+├── examples/                            Programs that use the public SDK (opentalk-ping)
 ├── tests/unit/                          Qt Test unit tests, one executable per test file
-├── tests/fuzz/                          libFuzzer harnesses for parsers of untrusted input
+├── tests/integration/                   Real components over real sockets, and the real executables
+├── tests/data/                          Test-only certificate and key
+├── tests/fuzz/                          libFuzzer harnesses and seed inputs for code that reads untrusted input
 ├── docs/                                Design, decisions, plans, references
 └── .github/workflows/                   CI
 ```
 
-Directories such as `src/server`, `plugins/examples` and `packaging/windows` are created by the phase that first needs them. Empty placeholder directories are deliberately avoided.
+Directories such as `plugins/examples` and `packaging/windows` are created by the phase that first needs them. Empty placeholder directories are deliberately avoided.

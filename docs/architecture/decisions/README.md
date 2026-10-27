@@ -8,5 +8,6 @@ Short records of significant decisions: context, options, decision, consequences
 | [0002](0002-license-gpl-3-only.md) | GPL-3.0-only for all first-party code | Accepted (owner requirement) |
 | [0003](0003-settings-json-schema.md) | Client settings as schema-validated JSON | Accepted |
 | [0004](0004-process-model.md) | Server as a library with a headless host process | Accepted |
-| [0005](0005-transport-and-serialization.md) | TLS/TCP control channel with CBOR; separate UDP audio | Provisional |
+| [0005](0005-transport-and-serialization.md) | TLS/TCP control channel with CBOR; separate UDP audio | Control channel accepted and implemented; audio part provisional |
 | [0006](0006-plugin-isolation.md) | Two-tier plugin model, out-of-process by default | Provisional |
+| [0007](0007-openssl-tls-backend.md) | Qt's OpenSSL TLS backend on every platform | Accepted |

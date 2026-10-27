@@ -4,7 +4,8 @@
 
 **Requirements**
 
-- Windows 11 x64 (Windows 10 22H2 should work).
+- Windows 10 (version 1809 or later) or Windows 11, x64.
+- OpenSSL 3 DLLs (`libssl-3-x64.dll`, `libcrypto-3-x64.dll`) on `PATH` to run the tests and programs. Install them with the Qt installer's "OpenSSL 3 Toolkit" component, or with `aqt install-tool windows desktop tools_opensslv3_x64`. See [ADR 0007](../architecture/decisions/0007-openssl-tls-backend.md).
 - Visual Studio 2022 (17.8 or later) with the "Desktop development with C++" workload. It includes MSVC, CMake and Ninja.
 - Qt 6.8 LTS or later, MSVC 2022 64-bit build, from the Qt online installer or `aqtinstall`. CI uses **Qt 6.8.3**.
 
@@ -23,7 +24,7 @@ To run the application, add `C:\Qt\6.8.3\msvc2022_64\bin` to `PATH`, or run `win
 
 **Portable mode:** create an empty file named `OpenTalk.portable` next to `OpenTalk.exe`. Settings and logs then go to a `data` folder beside it. You can also run `OpenTalk.exe --data-dir <folder>`.
 
-**Ready-made build:** every CI run on GitHub uploads **OpenTalk-portable-windows-x64**, a zip that needs no installation. Find it on the run's page in the repository's Actions tab.
+**Ready-made build:** every CI run on GitHub uploads **OpenTalk-portable-windows-x64**, a zip that needs no installation. It contains `OpenTalk.exe`, `opentalk-server.exe`, `opentalk-ping.exe` and the OpenSSL DLLs. Find it on the run's page in the repository's Actions tab.
 
 ## Linux (development and CI only, not a supported user platform yet)
 

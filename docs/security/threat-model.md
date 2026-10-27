@@ -1,6 +1,6 @@
 # Threat model and security plan
 
-**Status:** Designed. Implemented so far: bounded, fuzzed frame parsing; logs that never include message contents; crash-safe settings. This document is reviewed at the start of each phase and whenever a trust boundary changes.
+**Status:** Designed, with the control-channel protections implemented: TLS 1.3, certificate pinning, bounded and fuzzed parsing of frames and messages, strict session state machines, rate and connection limits, and timeouts. Also implemented: logs without message contents, and crash-safe settings. This document is reviewed at the start of each phase and whenever a trust boundary changes.
 
 ## Process
 
@@ -30,18 +30,18 @@ Account credentials and session tokens; server admin credentials and TLS private
 
 | ID | Threat (STRIDE) | Boundary | Mitigation | Verification |
 |---|---|---|---|---|
-| T1 | Malformed or oversized frames crash the parser or exhaust memory (D, E) | TB1, TB2 | Header-first size check, permanent failure after an error, 64 KiB limit | Unit tests and fuzzing (**implemented**); CBOR schema fuzzing in Phase 2 |
-| T2 | Eavesdropping or modification in transit (I, T) | TB1, TB2 | TLS 1.3 control channel; encrypted and authenticated audio | Integration tests; TLS configuration test |
-| T3 | Server impersonation (S) | TB2 | Certificate pinning (trust on first use) or CA validation; loud mismatch warning | Tests with a substituted certificate |
+| T1 | Malformed or oversized frames crash the parser or exhaust memory (D, E) | TB1, TB2 | Header-first size check, permanent failure after an error, 64 KiB limit; strict CBOR schemas; state-machine checks | Unit tests, TLS integration tests with hostile clients, three fuzzers (**implemented**) |
+| T2 | Eavesdropping or modification in transit (I, T) | TB1, TB2 | TLS 1.3 control channel (**implemented**; TLS 1.2 refused); encrypted and authenticated audio (Phase 4) | `tst_tls_session` |
+| T3 | Server impersonation (S) | TB2 | Certificate pinning (trust on first use) or CA validation; mismatch is refused with an explanation (**implemented**; the confirm-and-remember UI arrives in Phase 3) | `tst_tls_session` (unknown and wrong pins) |
 | T4 | Password guessing, credential stuffing (S) | TB1 | Argon2id; per-account and per-address backoff; optional lockout | Rate-limit tests |
 | T5 | Privilege escalation by forged requests (E) | TB1 | Every operation authorized server-side against the session's account, never against fields sent by the client | A test matrix of "unauthorized role × every admin message" |
-| T6 | Flooding: connections, messages, channel creation, audio (D) | TB1 | Connection caps per address, token buckets, maximum channels and users, idle timeouts | Load and abuse tests |
-| T7 | A malicious server sends hostile text or names (T, E) | TB2 | Text is shown as plain text only, never rendered as HTML; length limits; control characters stripped from names | Unit tests on display code |
+| T6 | Flooding: connections, messages, channel creation, audio (D) | TB1 | Per-address connection cap, total session cap, message token bucket, TLS handshake, Hello and idle timeouts (**implemented**); channel limits later | Unit and integration tests; load tests in Phase 8 |
+| T7 | A malicious server sends hostile text or names (T, E) | TB2 | Text is shown as plain text only, never rendered as HTML; length limits and rejection of control and bidirectional-override characters (**implemented** in the codec) | `tst_messages` |
 | T8 | Disclosure through logs or support bundles (I) | All | No passwords, tokens or message contents logged; IP addresses only at the Detailed level; the user reviews a bundle before sharing | Log review; a test that searches logs for test secrets |
 | T9 | Local secret theft (I) | TB3 | Client passwords in Windows Credential Manager; server key and database with user-only file permissions | Manual check; documentation |
 | T10 | A plugin abuses its access (I, T, E) | TB4 | Out-of-process plugins, capability grants enforced at the IPC layer, user consent for sensitive capabilities | Phase 6 tests |
 | T11 | Replay of audio packets (T) | TB1 | Sequence numbers with a replay window inside the authenticated encryption | Phase 4 tests |
-| T12 | Protocol downgrade (T) | TB1 | Version chosen from the intersection; the client rejects versions outside its range; TLS 1.3 minimum | `tst_version` (**implemented**); handshake tests |
+| T12 | Protocol downgrade (T) | TB1 | Version chosen from the intersection; the client rejects versions outside its range; TLS 1.3 minimum | `tst_version`, `tst_session`, `tst_tls_session` (**implemented**) |
 | T13 | Tampered release binaries (T) | TB6 | Signed releases (needs a code-signing certificate, which is an owner decision); published SHA-256 sums; HTTPS-only update checks | Release checklist |
 | T14 | Compromised dependency or CI action (T) | TB7 | Pinned versions, dependency review, `permissions: contents: read` in CI, a plan to pin actions by commit SHA | CI configuration review |
 | T15 | Moderator abuse; erasing the audit trail (R, E) | TB8 | Hash-chained audit log, non-delegable owner capabilities, required reasons, separation of duties for appeals. See the [moderation model](moderation-model.md) | Phase 5 tests |
