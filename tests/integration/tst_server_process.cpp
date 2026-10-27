@@ -5,6 +5,7 @@
 
 #include <QProcess>
 #include <QRegularExpression>
+#include <QTemporaryDir>
 #include <QTest>
 
 namespace {
@@ -19,6 +20,7 @@ class TestServerProcess : public QObject {
     Q_OBJECT
 
 private:
+    QTemporaryDir m_dataDir;
     QProcess m_server;
     quint16 m_port = 0;
     QString m_fingerprint;
@@ -41,10 +43,12 @@ private:
 private slots:
     void initTestCase()
     {
-        m_server.start(kServer, {QStringLiteral("--listen"), QStringLiteral("127.0.0.1"), QStringLiteral("--port"),
-                                 QStringLiteral("0"), QStringLiteral("--name"), QStringLiteral("Process Test"),
-                                 QStringLiteral("--tls-cert"), kDataDir + QStringLiteral("/test-server.crt"),
-                                 QStringLiteral("--tls-key"), kDataDir + QStringLiteral("/test-server.key")});
+        QVERIFY(m_dataDir.isValid());
+        m_server.start(kServer, {QStringLiteral("--data-dir"), m_dataDir.path(), QStringLiteral("--listen"),
+                                 QStringLiteral("127.0.0.1"), QStringLiteral("--port"), QStringLiteral("0"),
+                                 QStringLiteral("--name"), QStringLiteral("Process Test"), QStringLiteral("--tls-cert"),
+                                 kDataDir + QStringLiteral("/test-server.crt"), QStringLiteral("--tls-key"),
+                                 kDataDir + QStringLiteral("/test-server.key")});
         QVERIFY2(m_server.waitForStarted(10'000), qPrintable(m_server.errorString()));
 
         // Wait until the server has printed its port and fingerprint.
@@ -104,7 +108,8 @@ private slots:
     void serverRejectsBadArguments()
     {
         QProcess process;
-        process.start(kServer, {QStringLiteral("--port"), QStringLiteral("70000")});
+        process.start(kServer, {QStringLiteral("--data-dir"), m_dataDir.path(), QStringLiteral("--port"),
+                                QStringLiteral("70000")});
         QVERIFY(process.waitForFinished(10'000));
         QCOMPARE(process.exitCode(), 1);
     }

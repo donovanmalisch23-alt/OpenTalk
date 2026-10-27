@@ -38,6 +38,14 @@ enum class ErrorCode : quint16 {
     InternalError = 9,
 };
 
+/// Account roles. Phase 3 uses these fixed roles; Phase 5 replaces them with
+/// configurable roles and capabilities. Values are part of the wire format.
+enum class Role : quint8 {
+    Guest = 0, ///< Not logged in to an account; joins and chats where allowed.
+    User = 1,  ///< Registered account.
+    Admin = 2, ///< Manages channels and can send server-wide messages.
+};
+
 /// Upper bounds for strings in session messages, in UTF-16 code units.
 inline constexpr qsizetype kMaxNameLength = 128;
 inline constexpr qsizetype kMaxDetailLength = 1024;

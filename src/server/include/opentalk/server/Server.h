@@ -15,6 +15,8 @@
 
 namespace opentalk::server {
 
+class ServerDatabase;
+
 struct ServerConfig {
     QHostAddress address = QHostAddress::Any;
     quint16 port = 10350; ///< 0 picks a free port (used by tests).
@@ -27,6 +29,10 @@ struct ServerConfig {
     int tlsHandshakeTimeoutMs = 10'000;
     /// How long stop() waits for clients to receive their goodbye.
     int shutdownGraceMs = 3'000;
+    /// Let people join with a nickname and no account.
+    bool allowGuests = false;
+    /// Accounts and persistent channels. Not owned; must outlive the server.
+    ServerDatabase *database = nullptr;
 };
 
 /// Accepts TLS connections and runs one ServerSession per client. Runs on the thread
