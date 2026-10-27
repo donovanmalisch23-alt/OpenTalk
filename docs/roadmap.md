@@ -35,15 +35,28 @@ Deliverables: [project brief](project-brief.md), [risk assessment](risk-assessme
 
 **Exit criterion met:** an integration test starts the server, connects a client over TLS 1.3, negotiates the version, pings and disconnects cleanly. Malformed input, oversized frames, plaintext, TLS 1.2-only, silent, flooding and wrong-certificate clients are refused (`tst_tls_session`, `tst_session`). Three fuzzers cover the parsing and session code.
 
-## Phase 3: Minimal end-to-end communication
+## Phase 3: Minimal end-to-end communication (done, except the NVDA pass)
 
-Connect from the desktop app (server list, the trust-on-first-use prompt that remembers fingerprints, accessible connection status); automatic self-signed certificate creation for new servers; accounts with Argon2id (libsodium); authentication; the channel tree; join and leave; presence; channel and direct text messages; basic permissions (hard-coded roles); server profiles in the client; start and stop a local server from the GUI; reconnection; accessible errors and announcements (A-7, A-8); event sounds (an original soundpack).
+| ID | Milestone | Status |
+|---|---|---|
+| M3.1 | Dependencies: libsodium, OpenSSL (vcpkg, pinned) and Qt SQL | Done; Windows packages now ship OpenSSL 3.6.5 instead of the end-of-life 3.0 |
+| M3.2 | Server data folder, SQLite database with migrations, Argon2id accounts, account commands, automatic self-signed certificate | Done |
+| M3.3 | Protocol messages for login, channels, presence and text; `ServerCore` with fixed roles; `ClientState` | Done; 21 server rule tests, 76 codec cases, fuzzed |
+| M3.4 | Network wiring, request API, automatic reconnection, SDK 0.2 | Done; multi-client end-to-end tests including a server restart |
+| M3.5 | Desktop app: saved servers, trust prompt, channel tree, chat, private messages, announcements | Done; tested against a real server |
+| M3.6 | Host a server from the app; documentation | Done |
+| M3.7 | Manual NVDA pass of the [script](accessibility/nvda-test-script.md) (steps 19–30 are new) | **Open: needs the owner or a tester** |
 
-**Exit:** two or more clients on a LAN can log in, browse, join channels and chat. The integration and NVDA scripts pass.
+**Moved out of Phase 3:**
+
+- **Event sounds** move to **Phase 4**, so they use the new audio output path instead of a temporary one. Every event already has a history line, and most have an announcement.
+- **Remembering passwords** (Windows Credential Manager) moves to **Phase 8**. Today the app asks for the password on each connect and never stores it.
+
+**Exit criterion met (automated):** two or more clients on a server log in, browse channels, join, create and delete channels, and exchange channel and private messages. This is tested both with the client library and with the real main window. Remaining for full sign-off: the NVDA pass.
 
 ## Phase 4: Audio
 
-Starts with a **spike**: compare miniaudio, Qt Multimedia and raw WASAPI for latency, dropouts and device hot-plug, and decide audio encryption (DTLS or AEAD) with an ADR. Then: capture, Opus, UDP transport, jitter buffer, playback and mixing, push-to-talk (global hotkey), voice activation, mute and deafen, volumes, device selection and recovery, TCP fallback, and a benchmark harness.
+Starts with a **spike**: compare miniaudio, Qt Multimedia and raw WASAPI for latency, dropouts and device hot-plug, and decide audio encryption (DTLS or AEAD) with an ADR. Then: capture, Opus, UDP transport, jitter buffer, playback and mixing, push-to-talk (global hotkey), voice activation, mute and deafen, volumes, device selection and recovery, TCP fallback, a benchmark harness, and **event sounds** with an original soundpack.
 
 **Exit:** several clients exchange clear voice, with measured latency, CPU and loss-tolerance numbers published alongside the test setup.
 
@@ -65,7 +78,7 @@ Effects pipeline; media player plugin; per-process WASAPI loopback that excludes
 
 ## Phase 8: Hosting, deployment and hardening
 
-Public-hosting guide, reachability self-test, certificate setup, **packaged OpenSSL moved to a supported series (3.5 LTS) with licence notices**, installer (and portable build), backups and restore, static analysis and dependency scanning in CI, longer fuzzing, resource-exhaustion tests, a release signing decision.
+Public-hosting guide, reachability self-test, certificate setup, **packaged OpenSSL on a supported LTS series, with licence notices for all bundled libraries**, remembered passwords in Windows Credential Manager, installer (and portable build), backups and restore, static analysis and dependency scanning in CI, longer fuzzing, resource-exhaustion tests, a release signing decision.
 
 ## Phase 9: Release candidate
 

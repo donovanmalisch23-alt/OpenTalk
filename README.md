@@ -4,7 +4,7 @@
 
 OpenTalk lets communities run their own voice and text chat servers, with channels, push-to-talk, moderation tools and plugins, and no central company in the middle. It is inspired by the functionality of TeamTalk 5 but is an independent project with its own protocol, SDK and code, written in C++ with Qt.
 
-> **Status: early development (version 0.1.0).** The desktop window, keyboard navigation and settings work. The headless server and the encrypted connection protocol work and are tested, and `opentalk-ping` can check a server. Logging in, channels, text chat and voice are **not implemented yet**, and the desktop app cannot connect to servers yet. See [docs/status.md](docs/status.md) for exactly what works and what has been verified.
+> **Status: early development (version 0.1.0).** Text chat works: host a server from the app or run `opentalk-server`, then log in, use channels, and send channel, private and server-wide messages, all over TLS 1.3. **Voice is not implemented yet** (next phase). See [docs/status.md](docs/status.md) for exactly what works and what has been verified.
 
 ## Principles
 
@@ -21,7 +21,9 @@ OpenTalk lets communities run their own voice and text chat servers, with channe
 1. Open the repository's **Actions** tab, select the latest successful **CI** run, and download **OpenTalk-portable-windows-x64**.
 2. Unzip it anywhere and run `OpenTalk.exe`. No installation or administrator rights are needed; settings stay in the `data` folder next to it.
 
-Keyboard: **F6** cycles between panes, **Ctrl+1** to **Ctrl+4** jump to channels, users, history and message input, and **F4** opens Settings.
+To try chatting: **Server menu → Host a server on this computer**, choose an administrator name and password, and press Enter. To join a friend's server: **Ctrl+O**.
+
+Keyboard: **F6** cycles between panes, **Ctrl+1** to **Ctrl+4** jump to channels, users, history and message input, **Enter** on a channel joins it, **Ctrl+N** creates a channel, **Ctrl+P** sends a private message, and **F4** opens Settings. The full list is in the [accessibility plan](docs/accessibility/plan.md#keyboard-map-implemented).
 
 The zip also contains `opentalk-server.exe` and `opentalk-ping.exe`. See the [server quick start](docs/server-administration/quick-start.md).
 

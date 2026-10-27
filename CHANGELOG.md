@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ### Added
 
+- Text chat: accounts (Argon2id) and guests, channels (temporary and persistent, passwords, user limits), presence, channel, private and server-wide messages, with permissions enforced by the server for three fixed roles.
+- Desktop app: connect dialog with saved servers, trust-on-first-use prompt, channel tree with users, chat history, private messages, automatic reconnection, and hosting a server from the app.
+- Screen reader announcements for messages and people joining or leaving, combined and spaced to avoid flooding, each switchable in Settings.
+- `opentalk-server`: data folder with an SQLite database, automatic self-signed certificate, account commands, `--allow-guests`, `--stop-when-stdin-closes`.
+- SDK 0.2: login, channels, users and text.
+- Windows builds get OpenSSL and libsodium from vcpkg pinned to one commit.
+
 - Protocol version 1 control channel: CBOR session messages (Hello, Welcome, Ping, Pong, Goodbye, Error), strict validation, client and server session state machines with heartbeats, timeouts and rate limiting.
 - TLS 1.3 for all connections using Qt's OpenSSL backend on every platform (ADR 0007); certificate fingerprints and trust-on-first-use pinning.
 - Headless `opentalk-server` with connection limits and graceful shutdown.
