@@ -3,6 +3,7 @@
 
 #include "opentalk/protocol/Messages.h"
 #include "opentalk/protocol/Session.h"
+#include "opentalk/security/PasswordHash.h"
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -15,6 +16,8 @@
 
 namespace opentalk::server {
 
+class PasswordWorker;
+class ServerCore;
 class ServerDatabase;
 
 struct ServerConfig {
@@ -31,8 +34,11 @@ struct ServerConfig {
     int shutdownGraceMs = 3'000;
     /// Let people join with a nickname and no account.
     bool allowGuests = false;
-    /// Accounts and persistent channels. Not owned; must outlive the server.
+    /// Accounts and persistent channels. Not owned; must outlive the server. Without a
+    /// database only guests can log in.
     ServerDatabase *database = nullptr;
+    /// Argon2id cost for channel passwords (tests lower it to stay fast).
+    security::PasswordHashCost passwordCost = security::PasswordHashCost::interactive();
 };
 
 /// Accepts TLS connections and runs one ServerSession per client. Runs on the thread
@@ -54,11 +60,13 @@ public:
     quint16 serverPort() const;
     /// Connections that completed the TLS handshake and have not closed yet.
     int sessionCount() const;
+    /// Users who are logged in.
+    int onlineUserCount() const;
     QString certificateFingerprint() const;
 
 signals:
-    void sessionEstablished(quint64 sessionId, const opentalk::protocol::Hello &client);
-    void sessionClosed(quint64 sessionId, const opentalk::protocol::CloseInfo &info);
+    void sessionEstablished(quint32 sessionId, const opentalk::protocol::Hello &client);
+    void sessionClosed(quint32 sessionId, const opentalk::protocol::CloseInfo &info);
     void stopped();
 
 private:
@@ -66,14 +74,17 @@ private:
     class Peer;
 
     void acceptConnection(qintptr socketDescriptor);
-    void removePeer(quint64 id);
+    void removePeer(quint32 id);
+    void startSession(Peer *peer);
     void finishStopIfDone();
 
     ServerConfig m_config;
     std::unique_ptr<Listener> m_listener;
-    QHash<quint64, Peer *> m_peers;
+    std::unique_ptr<PasswordWorker> m_passwords;
+    std::unique_ptr<ServerCore> m_core;
+    QHash<quint32, Peer *> m_peers;
     QHash<QHostAddress, int> m_connectionsPerAddress;
-    quint64 m_nextId = 1;
+    quint32 m_nextId = 1;
     QTimer m_tickTimer;
     QTimer m_shutdownTimer;
     QElapsedTimer m_clock;

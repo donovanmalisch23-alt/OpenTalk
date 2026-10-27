@@ -4,6 +4,10 @@
 // tool for checking that a server is reachable.
 //
 //   opentalk-ping example.org --port 10350 --fingerprint SHA256:AB:CD:...
+//   opentalk-ping example.org --user alice < password.txt
+//
+// It logs in as a guest unless --user is given (the password is then read from the
+// first line of standard input).
 
 #include <opentalk/sdk/Client.h>
 
@@ -12,6 +16,9 @@
 #include <QLoggingCategory>
 #include <QTextStream>
 #include <QTimer>
+
+#include <iostream>
+#include <string>
 
 int main(int argc, char *argv[])
 {
@@ -30,7 +37,14 @@ int main(int argc, char *argv[])
                                                QStringLiteral("Expected SHA-256 certificate fingerprint."),
                                                QStringLiteral("fingerprint"));
     const QCommandLineOption verboseOption(QStringLiteral("verbose"), QStringLiteral("Show diagnostic messages."));
-    parser.addOptions({portOption, fingerprintOption, verboseOption});
+    const QCommandLineOption userOption(QStringLiteral("user"),
+                                        QStringLiteral("Log in to this account; the password is read from "
+                                                       "standard input."),
+                                        QStringLiteral("username"));
+    const QCommandLineOption guestOption(
+        QStringLiteral("guest-name"), QStringLiteral("Nickname when logging in as a guest (default: opentalk-ping)."),
+        QStringLiteral("name"), QStringLiteral("opentalk-ping"));
+    parser.addOptions({portOption, fingerprintOption, verboseOption, userOption, guestOption});
     parser.process(app);
     if (!parser.isSet(verboseOption)) {
         QLoggingCategory::setFilterRules(QStringLiteral("opentalk.*=false"));
@@ -58,7 +72,9 @@ int main(int argc, char *argv[])
     QObject::connect(&client, &opentalk::sdk::Client::connected, [&](const opentalk::sdk::ServerInfo &server) {
         out << "Connected to \"" << server.name << "\" (OpenTalk " << server.softwareVersion << ", protocol "
             << server.protocolVersion << ")\n"
-            << "Certificate: " << server.certificateFingerprint << '\n';
+            << "Certificate: " << server.certificateFingerprint << '\n'
+            << "Logged in as " << client.self().name << "; " << client.users().size() << " user(s) and "
+            << client.channels().size() << " channel(s) on the server\n";
         out.flush();
         client.ping();
     });
@@ -81,7 +97,20 @@ int main(int argc, char *argv[])
         QCoreApplication::exit(exitCode);
     });
 
+    opentalk::sdk::Login login;
+    if (parser.isSet(userOption)) {
+        login.mode = opentalk::sdk::Login::Mode::Account;
+        login.name = parser.value(userOption);
+        std::string password;
+        std::getline(std::cin, password);
+        if (!password.empty() && password.back() == '\r') {
+            password.pop_back();
+        }
+        login.password = QString::fromStdString(password);
+    } else {
+        login.name = parser.value(guestOption);
+    }
     client.connectToServer({parser.positionalArguments().first(), static_cast<quint16>(port)},
-                           {parser.value(fingerprintOption)});
+                           {parser.value(fingerprintOption)}, login);
     return QCoreApplication::exec();
 }

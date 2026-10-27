@@ -17,3 +17,11 @@ target_compile_definitions(tst_server_process PRIVATE
 add_dependencies(tst_server_process opentalk_server_app opentalk_ping)
 add_test(NAME tst_server_process COMMAND tst_server_process)
 set_tests_properties(tst_server_process PROPERTIES TIMEOUT 120)
+
+qt_add_executable(tst_chat_session tst_chat_session.cpp)
+target_link_libraries(tst_chat_session PRIVATE
+    Qt6::Test OpenTalk::Client OpenTalk::Server OpenTalk::Security OpenTalk::CompilerOptions)
+target_compile_definitions(tst_chat_session PRIVATE
+    OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+add_test(NAME tst_chat_session COMMAND tst_chat_session)
+set_tests_properties(tst_chat_session PROPERTIES TIMEOUT 180)

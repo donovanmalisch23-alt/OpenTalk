@@ -3,6 +3,8 @@
 
 #include "opentalk/sdk/Version.h"
 
+#include <QDateTime>
+#include <QList>
 #include <QObject>
 #include <QString>
 
@@ -22,6 +24,14 @@ struct ServerIdentity {
     QString pinnedFingerprint;
 };
 
+/// How to log in. Guests need the server to allow them.
+struct Login {
+    enum class Mode { Guest, Account };
+    Mode mode = Mode::Guest;
+    QString name; ///< Nickname (guest) or username (account).
+    QString password;
+};
+
 struct ServerInfo {
     QString name;
     QString softwareVersion;
@@ -29,7 +39,41 @@ struct ServerInfo {
     QString certificateFingerprint;
 };
 
-enum class ClientState { Disconnected, Connecting, Connected };
+enum class ClientState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Reconnecting, ///< The connection was lost; the SDK is trying again.
+};
+
+enum class Role { Guest, User, Admin };
+
+struct Channel {
+    quint32 id = 0;
+    quint32 parentId = 0; ///< 0 for the root channel.
+    QString name;         ///< Empty for the root channel.
+    QString topic;
+    bool persistent = false;
+    bool hasPassword = false;
+    int maxUsers = 0; ///< 0 = unlimited.
+};
+
+struct User {
+    quint32 id = 0; ///< Valid while the user stays connected.
+    QString name;
+    Role role = Role::Guest;
+    quint32 channelId = 0;
+};
+
+struct TextMessage {
+    enum class Kind { Channel, Direct, ServerWide };
+    Kind kind = Kind::Channel;
+    quint32 fromUserId = 0;
+    QString fromName;      ///< Empty if the sender already left.
+    quint32 channelId = 0; ///< For Kind::Channel.
+    QString text;
+    QDateTime time; ///< Server time, UTC.
+};
 
 struct DisconnectReason {
     enum class Kind {
@@ -37,6 +81,7 @@ struct DisconnectReason {
         ServerClosed,
         UntrustedCertificate, ///< certificateFingerprint says what the server presented.
         VersionMismatch,
+        LoginFailed,
         ProtocolError,
         Timeout,
         NetworkError,
@@ -53,8 +98,8 @@ struct DisconnectReason {
 /// thread that created the object. Call Client::initialize() once before the first
 /// connection.
 ///
-/// Draft API (SDK 0.x): connection, server information and round-trip measurement.
-/// Channels, users, text and audio are added as the server gains those features.
+/// Draft API (SDK 0.x): connection and login, channels, users and text. Audio is added
+/// when the server supports it.
 class Client : public QObject {
     Q_OBJECT
 
@@ -68,21 +113,39 @@ public:
     /// Name and version of your program, shown to server administrators.
     void setApplication(const QString &name, const QString &version);
 
-    void connectToServer(const ServerAddress &address, const ServerIdentity &identity = {});
+    void connectToServer(const ServerAddress &address, const ServerIdentity &identity, const Login &login);
+    /// Ends the connection; also stops automatic reconnection.
     void disconnectFromServer();
 
     ClientState state() const;
     /// Valid while connected.
     ServerInfo serverInfo() const;
+    User self() const;
+    QList<Channel> channels() const;
+    QList<User> users() const;
+
+    /// Requests return an ID (0 if not connected); the outcome arrives as
+    /// requestFinished() with that ID.
+    quint64 joinChannel(quint32 channelId, const QString &password = {});
+    quint64 sendChannelMessage(const QString &text);
+    quint64 sendDirectMessage(quint32 userId, const QString &text);
 
     /// Measures the round-trip time; the answer arrives as pingReplied().
     bool ping();
 
 signals:
     void stateChanged(opentalk::sdk::ClientState state);
+    /// Logged in. Also emitted after each automatic reconnection.
     void connected(const opentalk::sdk::ServerInfo &server);
     void disconnected(const opentalk::sdk::DisconnectReason &reason);
+    void reconnecting(int attempt, int delayMs);
     void pingReplied(qint64 milliseconds);
+    void requestFinished(quint64 requestId, bool succeeded, const QString &errorMessage);
+    void channelsChanged();
+    void userJoined(const opentalk::sdk::User &user);
+    void userLeft(const opentalk::sdk::User &user);
+    void userMoved(const opentalk::sdk::User &user);
+    void textReceived(const opentalk::sdk::TextMessage &message);
 
 private:
     class Private;

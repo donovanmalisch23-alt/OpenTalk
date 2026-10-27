@@ -54,6 +54,11 @@ public:
     /// The transport closed or failed. Ends the session if it is not closed already.
     void transportClosed(const QString &detail);
 
+    /// Sends an application message (only while established).
+    void sendMessage(const Message &message);
+    /// Sends Error{code} and closes the session.
+    void closeWithError(ErrorCode code, const QString &detail);
+
 signals:
     /// Write these bytes to the transport, in order.
     void sendRequested(const QByteArray &bytes);
@@ -62,6 +67,9 @@ signals:
     void stateChanged(opentalk::protocol::SessionState state);
     /// Emitted exactly once when the session ends.
     void closed(const opentalk::protocol::CloseInfo &info);
+    /// A message for the application layer (anything other than session control), in
+    /// the direction this side is allowed to receive.
+    void applicationMessage(const opentalk::protocol::Message &message);
 
 protected:
     Session(quint32 maxIncomingPayload, QObject *parent);
@@ -96,6 +104,7 @@ public:
         VersionRange versions = kSupportedVersions;
         quint32 maxPayloadSize = kDefaultMaxPayloadSize;
         quint16 heartbeatIntervalSeconds = 15;
+        bool guestsAllowed = false; ///< Announced in Welcome.
         qint64 handshakeTimeoutMs = 10'000;
         /// Silence longer than this ends the session. Clients ping every heartbeat interval.
         qint64 idleTimeoutMs = 45'000;

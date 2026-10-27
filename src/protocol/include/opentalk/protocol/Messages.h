@@ -5,6 +5,7 @@
 
 #include <QByteArray>
 #include <QByteArrayView>
+#include <QList>
 #include <QString>
 #include <QtGlobal>
 
@@ -13,14 +14,33 @@
 
 namespace opentalk::protocol {
 
-/// Frame message types. See docs/protocol/proposal.md for the registry.
+/// Frame message types. Values are part of the wire format; see
+/// docs/protocol/proposal.md for the registry.
 enum class MessageType : quint16 {
+    // Session (0x0001-0x00FF)
     Hello = 0x0001,
     Welcome = 0x0002,
     Ping = 0x0003,
     Pong = 0x0004,
     Goodbye = 0x0005,
     Error = 0x0006,
+    Authenticate = 0x0007,
+    AuthResult = 0x0008,
+    // Channels (0x0100-0x01FF)
+    StateSnapshot = 0x0100,
+    ChannelAdded = 0x0101,
+    ChannelRemoved = 0x0102,
+    JoinChannel = 0x0110,
+    CreateChannel = 0x0111,
+    DeleteChannel = 0x0112,
+    RequestDone = 0x0120,
+    // Users and presence (0x0200-0x02FF)
+    UserJoined = 0x0200,
+    UserLeft = 0x0201,
+    UserMoved = 0x0202,
+    // Text (0x0300-0x03FF)
+    SendText = 0x0300,
+    TextMessage = 0x0301,
 };
 
 /// Numeric error codes carried by Error and Goodbye messages. Values are part of the
@@ -36,6 +56,13 @@ enum class ErrorCode : quint16 {
     Timeout = 7,
     ServerShuttingDown = 8,
     InternalError = 9,
+    AuthenticationFailed = 10,
+    NotAuthorized = 11,
+    NotFound = 12,
+    ChannelFull = 13,
+    WrongChannelPassword = 14,
+    InvalidRequest = 15,
+    NameInUse = 16,
 };
 
 /// Account roles. Phase 3 uses these fixed roles; Phase 5 replaces them with
@@ -46,15 +73,28 @@ enum class Role : quint8 {
     Admin = 2, ///< Manages channels and can send server-wide messages.
 };
 
-/// Upper bounds for strings in session messages, in UTF-16 code units.
-inline constexpr qsizetype kMaxNameLength = 128;
-inline constexpr qsizetype kMaxDetailLength = 1024;
+// Limits, in UTF-16 code units unless stated otherwise.
+inline constexpr qsizetype kMaxNameLength = 128;       ///< Client and server software names.
+inline constexpr qsizetype kMaxDetailLength = 1024;    ///< Error detail text.
+inline constexpr qsizetype kMaxDisplayNameLength = 32; ///< User and guest names.
+inline constexpr qsizetype kMaxChannelNameLength = 64;
+inline constexpr qsizetype kMaxTopicLength = 256;
+inline constexpr qsizetype kMaxTextLength = 2000;       ///< One chat message.
+inline constexpr qsizetype kMaxSecretLength = 1024;     ///< Passwords.
+inline constexpr qsizetype kMaxSnapshotEntries = 10000; ///< Channels or users in one snapshot.
+/// Largest payload a server may send. Clients accept up to this; servers accept only
+/// the smaller limit they announce in Welcome.
+inline constexpr quint32 kMaxServerPayloadSize = 1024 * 1024;
+/// The root channel always exists and cannot be deleted.
+inline constexpr quint32 kRootChannelId = 1;
+
+// ----------------------------------------------------------------- session messages
 
 /// First message from the client: the protocol versions it speaks and who it is.
 struct Hello {
     VersionRange versions;
-    QString clientName;    ///< For example "OpenTalk".
-    QString clientVersion; ///< For example "0.2.0".
+    QString clientName;
+    QString clientVersion;
     friend bool operator==(const Hello &, const Hello &) = default;
 };
 
@@ -65,10 +105,11 @@ struct Welcome {
     QString serverVersion;
     quint32 maxPayloadSize = 0;
     quint16 heartbeatIntervalSeconds = 0;
+    bool guestsAllowed = false;
     friend bool operator==(const Welcome &, const Welcome &) = default;
 };
 
-/// Liveness check. The receiver answers with a Pong carrying the same token.
+/// Liveness check. The receiver answers with a Pong carrying the same token (63 bits).
 struct Ping {
     quint64 token = 0;
     friend bool operator==(const Ping &, const Ping &) = default;
@@ -86,7 +127,7 @@ struct Goodbye {
 };
 
 /// Reports a problem. `detail` is short English text for logs; user-facing text is
-/// built from `code` by the receiver.
+/// built from `code` by the receiver. `requestId` is set when it answers a request.
 struct Error {
     ErrorCode code = ErrorCode::InternalError;
     std::optional<quint64> requestId;
@@ -94,12 +135,152 @@ struct Error {
     friend bool operator==(const Error &, const Error &) = default;
 };
 
-using Message = std::variant<Hello, Welcome, Ping, Pong, Goodbye, Error>;
+/// Logs in after Welcome: with an account and password, or as a guest with a nickname.
+struct Authenticate {
+    enum class Mode : quint8 { Account = 0, Guest = 1 };
+    Mode mode = Mode::Account;
+    QString name;     ///< Username (Account) or nickname (Guest).
+    QString password; ///< Account mode only.
+    friend bool operator==(const Authenticate &, const Authenticate &) = default;
+};
+
+/// Successful login. Followed immediately by a StateSnapshot.
+struct AuthResult {
+    quint32 userId = 0; ///< This session's user ID (valid until disconnect).
+    QString displayName;
+    Role role = Role::Guest;
+    friend bool operator==(const AuthResult &, const AuthResult &) = default;
+};
+
+// --------------------------------------------------------------- channels and users
+
+struct ChannelInfo {
+    quint32 id = 0;
+    quint32 parentId = 0; ///< 0 only for the root channel.
+    QString name;         ///< Empty only for the root channel.
+    QString topic;
+    bool persistent = false; ///< Survives restarts; temporary channels vanish when empty.
+    bool hasPassword = false;
+    quint16 maxUsers = 0; ///< 0 = unlimited.
+    friend bool operator==(const ChannelInfo &, const ChannelInfo &) = default;
+};
+
+struct UserInfo {
+    quint32 id = 0;
+    QString name;
+    Role role = Role::Guest;
+    quint32 channelId = kRootChannelId;
+    friend bool operator==(const UserInfo &, const UserInfo &) = default;
+};
+
+/// Everything a client needs to show the server, sent once after AuthResult.
+struct StateSnapshot {
+    QList<ChannelInfo> channels;
+    QList<UserInfo> users;
+    friend bool operator==(const StateSnapshot &, const StateSnapshot &) = default;
+};
+
+struct ChannelAdded {
+    ChannelInfo channel;
+    friend bool operator==(const ChannelAdded &, const ChannelAdded &) = default;
+};
+
+struct ChannelRemoved {
+    quint32 channelId = 0;
+    friend bool operator==(const ChannelRemoved &, const ChannelRemoved &) = default;
+};
+
+/// Request: move to a channel. Answered by RequestDone or Error (with the request ID).
+struct JoinChannel {
+    quint64 requestId = 0;
+    quint32 channelId = 0;
+    QString password; ///< Empty if the channel has none.
+    friend bool operator==(const JoinChannel &, const JoinChannel &) = default;
+};
+
+/// Request: create a channel. RequestDone carries the new channel's ID.
+struct CreateChannel {
+    quint64 requestId = 0;
+    quint32 parentId = kRootChannelId;
+    QString name;
+    QString topic;
+    bool persistent = false;
+    QString password;
+    quint16 maxUsers = 0;
+    friend bool operator==(const CreateChannel &, const CreateChannel &) = default;
+};
+
+/// Request: delete a channel (administrators only).
+struct DeleteChannel {
+    quint64 requestId = 0;
+    quint32 channelId = 0;
+    friend bool operator==(const DeleteChannel &, const DeleteChannel &) = default;
+};
+
+/// Success answer to a request.
+struct RequestDone {
+    quint64 requestId = 0;
+    std::optional<quint32> resultId; ///< For example the ID of a created channel.
+    friend bool operator==(const RequestDone &, const RequestDone &) = default;
+};
+
+struct UserJoined {
+    UserInfo user;
+    friend bool operator==(const UserJoined &, const UserJoined &) = default;
+};
+
+struct UserLeft {
+    quint32 userId = 0;
+    friend bool operator==(const UserLeft &, const UserLeft &) = default;
+};
+
+struct UserMoved {
+    quint32 userId = 0;
+    quint32 channelId = 0;
+    friend bool operator==(const UserMoved &, const UserMoved &) = default;
+};
+
+// --------------------------------------------------------------------------- text
+
+enum class TextTarget : quint8 {
+    Channel = 0, ///< targetId is a channel ID (the sender's current channel).
+    User = 1,    ///< targetId is a user ID: a direct message.
+    Server = 2,  ///< To everyone on the server (administrators only); targetId is 0.
+};
+
+/// Request: send a text message. The server echoes it back as a TextMessage.
+struct SendText {
+    quint64 requestId = 0;
+    TextTarget target = TextTarget::Channel;
+    quint32 targetId = 0;
+    QString text;
+    friend bool operator==(const SendText &, const SendText &) = default;
+};
+
+/// A delivered text message, stamped by the server.
+struct TextMessage {
+    TextTarget target = TextTarget::Channel;
+    quint32 fromUserId = 0;
+    quint32 targetId = 0;
+    QString text;
+    qint64 timestampMs = 0; ///< Server time, milliseconds since 1970-01-01 UTC.
+    friend bool operator==(const TextMessage &, const TextMessage &) = default;
+};
+
+using Message = std::variant<Hello, Welcome, Ping, Pong, Goodbye, Error, Authenticate, AuthResult, StateSnapshot,
+                             ChannelAdded, ChannelRemoved, JoinChannel, CreateChannel, DeleteChannel, RequestDone,
+                             UserJoined, UserLeft, UserMoved, SendText, TextMessage>;
 
 MessageType messageType(const Message &message);
 
-/// Encodes a message as a complete frame (header + CBOR payload).
-QByteArray encodeMessage(const Message &message);
+/// Messages a client may send, and messages a server may send. A peer that sends a
+/// type meant for the other direction is violating the protocol.
+bool isClientToServer(MessageType type);
+bool isServerToClient(MessageType type);
+
+/// Encodes a message as a complete frame (header + CBOR payload). Returns an empty
+/// array if the payload would exceed `maxPayloadSize`.
+QByteArray encodeMessage(const Message &message, quint32 maxPayloadSize = kMaxServerPayloadSize);
 
 /// Why a frame could not be turned into a message.
 struct MessageDecodeFailure {
@@ -111,10 +292,18 @@ using MessageDecodeResult = std::variant<Message, MessageDecodeFailure>;
 
 /// Decodes and validates one frame payload. Never trusts its input: the payload must be
 /// exactly one CBOR map, required fields must be present with the right types and
-/// ranges, and strings must be within limits and free of control characters. Unknown
+/// ranges, and text must be within limits and free of characters that could hide or
+/// disguise it (control characters, and bidirectional overrides in chat text). Unknown
 /// map keys are ignored so newer peers stay compatible.
 MessageDecodeResult decodeMessage(quint16 type, QByteArrayView payload);
 
+/// True if `text` is acceptable as a user or channel name: not blank, within
+/// `maxLength`, and without control or invisible formatting characters.
+bool isValidName(const QString &text, qsizetype maxLength);
+/// True if `text` is acceptable as chat text (newlines and tabs allowed).
+bool isValidChatText(const QString &text);
+
 QString toString(ErrorCode code);
+QString toString(MessageType type);
 
 } // namespace opentalk::protocol

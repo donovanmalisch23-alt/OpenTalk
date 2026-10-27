@@ -4,14 +4,38 @@
 #include "opentalk/logging/Logging.h"
 #include "opentalk/security/Tls.h"
 
+#include <QRandomGenerator>
 #include <QSslCipher>
 #include <QSslSocket>
+
+#include <algorithm>
 
 namespace opentalk::client {
 
 using protocol::CloseInfo;
 using protocol::ErrorCode;
 using Reason = DisconnectInfo::Reason;
+
+namespace {
+
+constexpr int kMaxReconnectDelayMs = 30'000;
+
+/// Connection problems worth retrying after an established connection was lost.
+bool isRecoverable(const DisconnectInfo &info)
+{
+    switch (info.reason) {
+    case Reason::NetworkError:
+    case Reason::Timeout:
+        return true;
+    case Reason::ServerClosed:
+        return info.protocolCode == ErrorCode::ServerShuttingDown || info.protocolCode == ErrorCode::Timeout ||
+               info.protocolCode == ErrorCode::ServerFull || info.protocolCode == ErrorCode::InternalError;
+    default:
+        return false;
+    }
+}
+
+} // namespace
 
 Connection::Connection(QObject *parent)
     : QObject(parent)
@@ -31,6 +55,9 @@ Connection::Connection(QObject *parent)
         }
         finish(*m_pendingFailure);
     });
+    m_reconnectTimer.setSingleShot(true);
+    connect(&m_reconnectTimer, &QTimer::timeout, this, &Connection::startAttempt);
+    connect(&m_serverState, &ClientState::textReceived, this, &Connection::textReceived);
 }
 
 Connection::~Connection()
@@ -44,11 +71,6 @@ void Connection::setState(ConnectionState state)
         m_state = state;
         emit stateChanged(state);
     }
-}
-
-protocol::Welcome Connection::serverInfo() const
-{
-    return m_session ? m_session->welcome() : protocol::Welcome{};
 }
 
 void Connection::teardown()
@@ -70,16 +92,29 @@ void Connection::teardown()
 
 void Connection::connectToServer(const ConnectOptions &options)
 {
+    m_reconnectTimer.stop();
     teardown();
-    m_finished = false;
-    m_pendingFailure.reset();
-    m_serverFingerprint.clear();
     m_options = options;
+    m_everConnected = false;
+    m_reconnectAttempt = 0;
+    m_finished = false;
+    startAttempt();
+}
+
+void Connection::startAttempt()
+{
+    teardown();
+    m_pendingFailure.reset();
+    m_pendingRequests.clear();
+    m_serverFingerprint.clear();
+    m_welcome = {};
+    m_loggedIn = false;
+    m_serverState.clear();
     m_clock.start();
 
     m_socket = new QSslSocket(this);
     m_socket->setSslConfiguration(security::clientTlsConfiguration());
-    m_session = new protocol::ClientSession(options.session, this);
+    m_session = new protocol::ClientSession(m_options.session, this);
 
     // Session -> socket.
     connect(m_session, &protocol::Session::sendRequested, m_socket,
@@ -88,11 +123,16 @@ void Connection::connectToServer(const ConnectOptions &options)
         socket->disconnectFromHost(); // flushes pending writes first
     });
     connect(m_session, &protocol::ClientSession::established, this, [this](const protocol::Welcome &welcome) {
-        setState(ConnectionState::Connected);
-        qCInfo(lcClient).noquote() << "Connected to" << welcome.serverName << "(protocol" << welcome.version << ")";
-        emit connected(welcome);
+        m_welcome = welcome;
+        const Credentials &c = m_options.credentials;
+        m_session->sendMessage(protocol::Authenticate{c.mode == Credentials::Mode::Guest
+                                                          ? protocol::Authenticate::Mode::Guest
+                                                          : protocol::Authenticate::Mode::Account,
+                                                      c.name, c.password});
     });
     connect(m_session, &protocol::ClientSession::roundTripMeasured, this, &Connection::roundTripMeasured);
+    connect(m_session, &protocol::ClientSession::errorReceived, this, &Connection::onServerError);
+    connect(m_session, &protocol::Session::applicationMessage, this, &Connection::onApplicationMessage);
     connect(m_session, &protocol::Session::closed, this, &Connection::onSessionClosed);
 
     // Socket -> session.
@@ -122,11 +162,12 @@ void Connection::connectToServer(const ConnectOptions &options)
             DisconnectInfo{Reason::NetworkError, ErrorCode::None, QStringLiteral("connection closed"), {}}));
     });
 
+    m_finished = false;
     setState(ConnectionState::Connecting);
-    m_connectTimer.start(options.connectTimeoutMs);
-    qCInfo(lcClient) << "Connecting to port" << options.port;
-    qCDebug(lcClient).noquote() << "Host:" << options.host;
-    m_socket->connectToHostEncrypted(options.host, options.port);
+    m_connectTimer.start(m_options.connectTimeoutMs);
+    qCInfo(lcClient) << "Connecting to port" << m_options.port << "attempt" << (m_reconnectAttempt + 1);
+    qCDebug(lcClient).noquote() << "Host:" << m_options.host;
+    m_socket->connectToHostEncrypted(m_options.host, m_options.port);
 }
 
 void Connection::onSslErrors(const QList<QSslError> &errors)
@@ -166,6 +207,49 @@ void Connection::onEncrypted()
     m_session->start(m_clock.elapsed());
 }
 
+void Connection::onApplicationMessage(const protocol::Message &message)
+{
+    if (const auto *auth = std::get_if<protocol::AuthResult>(&message)) {
+        if (!m_loggedIn) {
+            m_serverState.setSelf(*auth);
+        }
+        return;
+    }
+    if (const auto *done = std::get_if<protocol::RequestDone>(&message)) {
+        if (m_pendingRequests.remove(done->requestId)) {
+            emit requestFinished(done->requestId, std::nullopt, done->resultId);
+        }
+        return;
+    }
+    if (!m_loggedIn) {
+        if (std::holds_alternative<protocol::StateSnapshot>(message) && m_serverState.selfId() != 0) {
+            m_serverState.apply(message);
+            m_loggedIn = true;
+            m_everConnected = true;
+            m_reconnectAttempt = 0;
+            setState(ConnectionState::Connected);
+            qCInfo(lcClient).noquote() << "Logged in to" << m_welcome.serverName << "as" << m_serverState.selfName();
+            emit connected(m_welcome);
+        }
+        return; // nothing else is meaningful before the snapshot
+    }
+    m_serverState.apply(message);
+}
+
+void Connection::onServerError(const protocol::Error &error)
+{
+    if (error.requestId && m_pendingRequests.remove(*error.requestId)) {
+        emit requestFinished(*error.requestId, error, std::nullopt);
+        return;
+    }
+    if (!m_loggedIn && (error.code == ErrorCode::AuthenticationFailed || error.code == ErrorCode::NameInUse)) {
+        // The server closes the connection right after this.
+        m_pendingFailure = DisconnectInfo{Reason::LoginFailed, error.code, error.detail, {}};
+        return;
+    }
+    qCInfo(lcClient).noquote() << "Server reported" << protocol::toString(error.code) << "-" << error.detail;
+}
+
 void Connection::onSessionClosed(const CloseInfo &info)
 {
     if (m_pendingFailure) {
@@ -192,6 +276,44 @@ void Connection::onSessionClosed(const CloseInfo &info)
     m_pendingFailure = result;
 }
 
+quint64 Connection::sendRequest(protocol::Message message, quint64 requestId)
+{
+    if (m_state != ConnectionState::Connected || !m_session) {
+        return 0;
+    }
+    m_pendingRequests.insert(requestId);
+    m_session->sendMessage(message);
+    return requestId;
+}
+
+quint64 Connection::joinChannel(quint32 channelId, const QString &password)
+{
+    const quint64 id = nextRequestId();
+    return sendRequest(protocol::JoinChannel{id, channelId, password}, id);
+}
+
+quint64 Connection::createChannel(const protocol::CreateChannel &request)
+{
+    protocol::CreateChannel copy = request;
+    copy.requestId = nextRequestId();
+    return sendRequest(copy, copy.requestId);
+}
+
+quint64 Connection::deleteChannel(quint32 channelId)
+{
+    const quint64 id = nextRequestId();
+    return sendRequest(protocol::DeleteChannel{id, channelId}, id);
+}
+
+quint64 Connection::sendText(protocol::TextTarget target, quint32 targetId, const QString &text)
+{
+    if (!protocol::isValidChatText(text)) {
+        return 0;
+    }
+    const quint64 id = nextRequestId();
+    return sendRequest(protocol::SendText{id, target, targetId, text}, id);
+}
+
 bool Connection::measureRoundTrip()
 {
     return m_session && m_session->ping(m_clock.elapsed());
@@ -199,14 +321,26 @@ bool Connection::measureRoundTrip()
 
 void Connection::disconnectFromServer()
 {
-    if (m_finished) {
+    if (m_finished && m_state != ConnectionState::Reconnecting) {
         return;
     }
-    if (m_session && m_session->state() != protocol::SessionState::Idle) {
+    const DisconnectInfo userRequested{Reason::UserRequested, ErrorCode::None, QStringLiteral("disconnected"), {}};
+    if (m_state == ConnectionState::Reconnecting) {
+        m_reconnectTimer.stop();
+        m_everConnected = false;
+        m_finished = false;
+        finish(userRequested);
+        return;
+    }
+    m_everConnected = false; // never reconnect after the user asked to disconnect
+    if (m_session && m_session->state() == protocol::SessionState::Established) {
         m_session->disconnectFromServer(); // sends Goodbye; socket closes after flushing
     } else {
-        m_pendingFailure = DisconnectInfo{Reason::UserRequested, ErrorCode::None, QStringLiteral("disconnected"), {}};
-        finish(*m_pendingFailure);
+        m_pendingFailure = userRequested;
+        if (m_socket) {
+            m_socket->abort();
+        }
+        finish(userRequested);
     }
 }
 
@@ -224,6 +358,24 @@ void Connection::finish(const DisconnectInfo &info)
             m_socket->disconnectFromHost();
         }
     }
+    // Requests in flight will never be answered on this connection.
+    const QSet<quint64> pending = std::exchange(m_pendingRequests, {});
+    for (quint64 id : pending) {
+        emit requestFinished(id, protocol::Error{ErrorCode::Timeout, id, QStringLiteral("connection lost")},
+                             std::nullopt);
+    }
+
+    if (m_everConnected && m_options.autoReconnect && isRecoverable(info)) {
+        ++m_reconnectAttempt;
+        const int base = std::min(kMaxReconnectDelayMs, 1000 << std::min(m_reconnectAttempt - 1, 5));
+        const int delay = base + static_cast<int>(QRandomGenerator::global()->bounded(500));
+        setState(ConnectionState::Reconnecting);
+        qCInfo(lcClient).noquote() << "Connection lost:" << info.detail << "- reconnecting in" << delay << "ms";
+        m_reconnectTimer.start(delay);
+        emit connectionLost(info, m_reconnectAttempt, delay);
+        m_finished = false; // the connection as a whole continues
+        return;
+    }
     setState(ConnectionState::Disconnected);
     qCInfo(lcClient).noquote() << "Disconnected:" << toString(info.reason) << "-" << info.detail;
     emit disconnected(info);
@@ -240,6 +392,8 @@ QString toString(ConnectionState state)
         return QStringLiteral("handshaking");
     case ConnectionState::Connected:
         return QStringLiteral("connected");
+    case ConnectionState::Reconnecting:
+        return QStringLiteral("reconnecting");
     }
     return QStringLiteral("unknown");
 }
@@ -255,6 +409,8 @@ QString toString(DisconnectInfo::Reason reason)
         return QStringLiteral("untrusted certificate");
     case Reason::VersionMismatch:
         return QStringLiteral("protocol version mismatch");
+    case Reason::LoginFailed:
+        return QStringLiteral("login failed");
     case Reason::ProtocolError:
         return QStringLiteral("protocol error");
     case Reason::Timeout:

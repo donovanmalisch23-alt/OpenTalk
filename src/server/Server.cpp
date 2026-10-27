@@ -3,7 +3,10 @@
 
 #include "opentalk/logging/Logging.h"
 #include "opentalk/security/Tls.h"
+#include "opentalk/server/PasswordWorker.h"
+#include "opentalk/server/ServerCore.h"
 
+#include <QDateTime>
 #include <QSslKey>
 #include <QSslSocket>
 #include <QTcpServer>
@@ -31,7 +34,7 @@ private:
 /// One client connection: its socket, its TLS handshake timer and (once encrypted) its session.
 class Server::Peer : public QObject {
 public:
-    Peer(quint64 peerId, QSslSocket *peerSocket, QObject *parent)
+    Peer(quint32 peerId, QSslSocket *peerSocket, QObject *parent)
         : QObject(parent)
         , id(peerId)
         , socket(peerSocket)
@@ -40,7 +43,7 @@ public:
         handshakeTimer.setSingleShot(true);
     }
 
-    quint64 id;
+    quint32 id;
     QSslSocket *socket;
     ServerSession *session = nullptr;
     QHostAddress address;
@@ -64,8 +67,8 @@ Server::Server(ServerConfig config, QObject *parent)
     m_shutdownTimer.setSingleShot(true);
     connect(&m_shutdownTimer, &QTimer::timeout, this, [this] {
         // Clients that did not close in time are cut off.
-        const QList<quint64> ids = m_peers.keys();
-        for (quint64 id : ids) {
+        const QList<quint32> ids = m_peers.keys();
+        for (quint32 id : ids) {
             if (Peer *peer = m_peers.value(id)) {
                 peer->socket->abort();
             }
@@ -92,6 +95,33 @@ bool Server::start(QString *errorMessage)
         }
         return false;
     }
+    m_passwords = std::make_unique<PasswordWorker>(m_config.passwordCost);
+    ServerCore::Config coreConfig;
+    coreConfig.allowGuests = m_config.allowGuests;
+    m_core = std::make_unique<ServerCore>(
+        coreConfig, m_config.database, *m_passwords, [this] { return m_clock.elapsed(); },
+        [] { return QDateTime::currentMSecsSinceEpoch(); });
+    QString coreError;
+    if (!m_core->loadChannels(&coreError)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = coreError;
+        }
+        m_core.reset();
+        return false;
+    }
+    connect(m_core.get(), &ServerCore::sendTo, this, [this](quint32 id, const protocol::Message &message) {
+        if (Peer *peer = m_peers.value(id); peer != nullptr && peer->session != nullptr) {
+            peer->session->sendMessage(message);
+        }
+    });
+    connect(m_core.get(), &ServerCore::closeSession, this, [this](quint32 id, ErrorCode code, const QString &detail) {
+        if (Peer *peer = m_peers.value(id); peer != nullptr && peer->session != nullptr) {
+            peer->session->closeWithError(code, detail);
+        }
+    });
+    m_config.session.guestsAllowed = m_config.allowGuests;
+
+    m_clock.start();
     m_listener = std::make_unique<Listener>(*this);
     m_listener->setMaxPendingConnections(64);
     if (!m_listener->listen(m_config.address, m_config.port)) {
@@ -105,7 +135,6 @@ bool Server::start(QString *errorMessage)
         return false;
     }
     m_stopping = false;
-    m_clock.start();
     m_tickTimer.start();
     qCInfo(lcServer).noquote() << "Listening on" << m_config.address.toString() << "port" << serverPort();
     return true;
@@ -119,6 +148,11 @@ bool Server::isListening() const
 quint16 Server::serverPort() const
 {
     return m_listener ? m_listener->serverPort() : 0;
+}
+
+int Server::onlineUserCount() const
+{
+    return m_core ? m_core->onlineUserCount() : 0;
 }
 
 int Server::sessionCount() const
@@ -159,7 +193,7 @@ void Server::acceptConnection(qintptr socketDescriptor)
     }
     ++fromAddress;
 
-    const quint64 id = m_nextId++;
+    const quint32 id = m_nextId++;
     auto *peer = new Peer(id, socket, this);
     peer->address = address;
     m_peers.insert(id, peer);
@@ -176,11 +210,15 @@ void Server::acceptConnection(qintptr socketDescriptor)
             const protocol::Hello &hello = peer->session->clientHello();
             qCInfo(lcServer).noquote() << "Session" << peer->id << "established:" << hello.clientName
                                        << hello.clientVersion << "protocol" << peer->session->negotiatedVersion();
+            m_core->sessionStarted(peer->id, peer->address);
             emit sessionEstablished(peer->id, hello);
         });
+        connect(session, &protocol::Session::applicationMessage, this,
+                [this, peer](const protocol::Message &message) { m_core->handleMessage(peer->id, message); });
         connect(session, &protocol::Session::closed, this, [this, peer](const CloseInfo &info) {
             qCInfo(lcServer).noquote() << "Session" << peer->id << "closed:" << protocol::toString(info.code)
                                        << info.detail;
+            m_core->sessionEnded(peer->id);
             emit sessionClosed(peer->id, info);
         });
         if (m_stopping) {
@@ -210,7 +248,7 @@ void Server::acceptConnection(qintptr socketDescriptor)
     socket->startServerEncryption();
 }
 
-void Server::removePeer(quint64 id)
+void Server::removePeer(quint32 id)
 {
     qCDebug(lcServer) << "Connection" << id << "removed";
     Peer *peer = m_peers.take(id);

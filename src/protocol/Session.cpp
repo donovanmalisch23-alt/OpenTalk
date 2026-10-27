@@ -24,9 +24,28 @@ void Session::setState(SessionState state)
 
 void Session::send(const Message &message)
 {
-    if (m_state != SessionState::Closed) {
-        emit sendRequested(encodeMessage(message));
+    if (m_state == SessionState::Closed) {
+        return;
     }
+    const QByteArray bytes = encodeMessage(message);
+    if (bytes.isEmpty()) {
+        // Only possible if this side built an oversized message: a bug, not peer input.
+        qWarning("opentalk: dropped an outgoing message that exceeds the size limit");
+        return;
+    }
+    emit sendRequested(bytes);
+}
+
+void Session::sendMessage(const Message &message)
+{
+    if (m_state == SessionState::Established) {
+        send(message);
+    }
+}
+
+void Session::closeWithError(ErrorCode code, const QString &detail)
+{
+    failProtocol(code, detail);
 }
 
 void Session::closeWith(const CloseInfo &info, const std::optional<Message> &finalMessage)
@@ -143,7 +162,7 @@ void ServerSession::handleMessage(const Message &message, qint64)
         m_clientHello = *hello;
         m_version = *version;
         send(Welcome{*version, m_config.serverName, m_config.serverVersion, m_config.maxPayloadSize,
-                     m_config.heartbeatIntervalSeconds});
+                     m_config.heartbeatIntervalSeconds, m_config.guestsAllowed});
         setState(SessionState::Established);
         emit established();
         return;
@@ -155,6 +174,8 @@ void ServerSession::handleMessage(const Message &message, qint64)
         // Pongs only prove liveness (already recorded); client Errors are informational.
     } else if (const auto *goodbye = std::get_if<Goodbye>(&message)) {
         closeWith({CloseInfo::Initiator::Peer, goodbye->reason, QStringLiteral("client said goodbye")}, std::nullopt);
+    } else if (isClientToServer(messageType(message)) && !std::holds_alternative<Hello>(message)) {
+        emit applicationMessage(message);
     } else {
         failProtocol(ErrorCode::ProtocolViolation, QStringLiteral("unexpected message after handshake"));
     }
@@ -178,7 +199,7 @@ void ServerSession::shutdown(ErrorCode reason)
 // ---------------------------------------------------------------------- ClientSession
 
 ClientSession::ClientSession(Config config, QObject *parent)
-    : Session(kDefaultMaxPayloadSize, parent)
+    : Session(kMaxServerPayloadSize, parent)
     , m_config(std::move(config))
 {
 }
@@ -261,6 +282,8 @@ void ClientSession::handleMessage(const Message &message, qint64 nowMs)
             m_lastRoundTripMs = nowMs - m_lastPingSentMs;
             emit roundTripMeasured(m_lastRoundTripMs);
         }
+    } else if (isServerToClient(messageType(message)) && !std::holds_alternative<Welcome>(message)) {
+        emit applicationMessage(message);
     } else {
         failProtocol(ErrorCode::ProtocolViolation, QStringLiteral("unexpected message after handshake"));
     }

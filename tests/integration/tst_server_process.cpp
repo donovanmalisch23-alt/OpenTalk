@@ -44,11 +44,12 @@ private slots:
     void initTestCase()
     {
         QVERIFY(m_dataDir.isValid());
-        m_server.start(kServer, {QStringLiteral("--data-dir"), m_dataDir.path(), QStringLiteral("--listen"),
-                                 QStringLiteral("127.0.0.1"), QStringLiteral("--port"), QStringLiteral("0"),
-                                 QStringLiteral("--name"), QStringLiteral("Process Test"), QStringLiteral("--tls-cert"),
-                                 kDataDir + QStringLiteral("/test-server.crt"), QStringLiteral("--tls-key"),
-                                 kDataDir + QStringLiteral("/test-server.key")});
+        m_server.start(kServer,
+                       {QStringLiteral("--data-dir"), m_dataDir.path(), QStringLiteral("--listen"),
+                        QStringLiteral("127.0.0.1"), QStringLiteral("--port"), QStringLiteral("0"),
+                        QStringLiteral("--name"), QStringLiteral("Process Test"), QStringLiteral("--allow-guests"),
+                        QStringLiteral("--tls-cert"), kDataDir + QStringLiteral("/test-server.crt"),
+                        QStringLiteral("--tls-key"), kDataDir + QStringLiteral("/test-server.key")});
         QVERIFY2(m_server.waitForStarted(10'000), qPrintable(m_server.errorString()));
 
         // Wait until the server has printed its port and fingerprint.

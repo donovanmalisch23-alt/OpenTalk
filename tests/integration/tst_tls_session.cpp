@@ -33,6 +33,7 @@ class TestTlsSession : public QObject {
 private:
     QSslConfiguration m_serverTls;
     std::unique_ptr<server::Server> m_server;
+    mutable int m_nextGuest = 1;
 
     void startServer(const std::function<void(server::ServerConfig &)> &adjust = {})
     {
@@ -42,6 +43,8 @@ private:
         config.tls = m_serverTls;
         config.session.serverName = QStringLiteral("Integration server");
         config.shutdownGraceMs = 2'000;
+        config.allowGuests = true;
+        config.passwordCost = security::PasswordHashCost::minimumForTests();
         if (adjust) {
             adjust(config);
         }
@@ -57,6 +60,8 @@ private:
         o.port = m_server->serverPort();
         o.trust = trust;
         o.session.clientVersion = QStringLiteral("test");
+        o.credentials.name = QStringLiteral("Tester%1").arg(m_nextGuest++);
+        o.autoReconnect = false;
         return o;
     }
 

@@ -3,8 +3,12 @@
 add_library(opentalk_server STATIC
     include/opentalk/server/Server.h
     include/opentalk/server/ServerDatabase.h
+    include/opentalk/server/ServerCore.h
+    include/opentalk/server/PasswordWorker.h
     Server.cpp
-    ServerDatabase.cpp)
+    ServerDatabase.cpp
+    ServerCore.cpp
+    PasswordWorker.cpp)
 add_library(OpenTalk::Server ALIAS opentalk_server)
 target_include_directories(opentalk_server PUBLIC include)
 target_link_libraries(opentalk_server
