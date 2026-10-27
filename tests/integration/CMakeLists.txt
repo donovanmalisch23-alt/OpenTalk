@@ -30,6 +30,16 @@ qt_add_executable(tst_mainwindow_online tst_mainwindow_online.cpp)
 target_link_libraries(tst_mainwindow_online PRIVATE
     Qt6::Test OpenTalk::Ui OpenTalk::Server OpenTalk::Security OpenTalk::CompilerOptions)
 target_compile_definitions(tst_mainwindow_online PRIVATE
-    OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+    OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data"
+    OPENTALK_SERVER_EXECUTABLE="$<TARGET_FILE:opentalk_server_app>")
+add_dependencies(tst_mainwindow_online opentalk_server_app)
 add_test(NAME tst_mainwindow_online COMMAND tst_mainwindow_online)
 set_tests_properties(tst_mainwindow_online PROPERTIES TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+qt_add_executable(tst_local_server tst_local_server.cpp)
+target_link_libraries(tst_local_server PRIVATE Qt6::Test OpenTalk::Client OpenTalk::Security OpenTalk::CompilerOptions)
+target_compile_definitions(tst_local_server PRIVATE
+    OPENTALK_SERVER_EXECUTABLE="$<TARGET_FILE:opentalk_server_app>")
+add_dependencies(tst_local_server opentalk_server_app)
+add_test(NAME tst_local_server COMMAND tst_local_server)
+set_tests_properties(tst_local_server PROPERTIES TIMEOUT 180)

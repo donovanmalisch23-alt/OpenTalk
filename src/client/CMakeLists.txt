@@ -3,8 +3,10 @@
 add_library(opentalk_client STATIC
     include/opentalk/client/ClientState.h
     include/opentalk/client/Connection.h
+    include/opentalk/client/LocalServer.h
     ClientState.cpp
-    Connection.cpp)
+    Connection.cpp
+    LocalServer.cpp)
 add_library(OpenTalk::Client ALIAS opentalk_client)
 target_include_directories(opentalk_client PUBLIC include)
 target_link_libraries(opentalk_client

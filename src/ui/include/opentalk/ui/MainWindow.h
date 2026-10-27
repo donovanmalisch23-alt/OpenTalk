@@ -2,7 +2,9 @@
 #pragma once
 
 #include "opentalk/client/Connection.h"
+#include "opentalk/client/LocalServer.h"
 #include "opentalk/storage/ServerProfiles.h"
+#include "opentalk/ui/ConnectDialog.h"
 
 #include <QHash>
 #include <QList>
@@ -72,6 +74,12 @@ public:
     ChannelTree *channelTree() const { return m_channelTree; }
     QString historyText() const;
     client::Connection &connection() { return m_connection; }
+    client::LocalServer &localServer() { return m_localServer; }
+
+    /// Hosts a server on this computer and joins it (what the "Host a server" dialog does).
+    void startLocalServer(const LocalServerDialog::Choice &choice);
+    /// Where opentalk-server is; by default next to this program.
+    void setLocalServerExecutable(const QString &path) { m_localServerExecutable = path; }
     QAction *settingsAction() const { return m_settingsAction; }
     QList<QAction *> paneActions() const { return m_paneActions; }
 
@@ -87,6 +95,8 @@ public slots:
     void openSettings();
     void openConnectDialog();
     void disconnectFromServer();
+    void openLocalServerDialog();
+    void stopLocalServer();
     void createChannel();
     void deleteSelectedChannel();
     void joinChannel(quint32 channelId);
@@ -119,12 +129,18 @@ private:
     void onTextReceived(const protocol::TextMessage &message);
     void onRequestFinished(quint64 requestId, const std::optional<protocol::Error> &error);
     void handleUntrustedCertificate(const client::DisconnectInfo &info);
+    void launchLocalServer(const LocalServerDialog::Choice &choice);
+    void onLocalServerStarted(quint16 port, const QString &fingerprint);
+    bool isConnectedToLocalServer() const;
     static QString friendlyError(const protocol::Error &error);
 
     storage::SettingsStore &m_settings;
     const storage::AppPaths &m_paths;
     storage::ServerProfileStore &m_profiles;
     client::Connection m_connection;
+    client::LocalServer m_localServer;
+    QString m_localServerExecutable;
+    std::optional<LocalServerDialog::Choice> m_localChoice;
     std::optional<storage::ServerProfile> m_profile;
     QString m_password;
     bool m_saveProfile = false;
@@ -145,6 +161,8 @@ private:
     QAction *m_settingsAction = nullptr;
     QAction *m_connectAction = nullptr;
     QAction *m_disconnectAction = nullptr;
+    QAction *m_hostAction = nullptr;
+    QAction *m_stopHostingAction = nullptr;
     QAction *m_joinAction = nullptr;
     QAction *m_createChannelAction = nullptr;
     QAction *m_deleteChannelAction = nullptr;

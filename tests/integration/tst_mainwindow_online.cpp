@@ -21,6 +21,7 @@
 #include <QListWidget>
 #include <QRegularExpression>
 #include <QSignalSpy>
+#include <QTcpServer>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTreeWidgetItemIterator>
@@ -271,6 +272,44 @@ private slots:
         const ui::ConnectDialog::Choice choice = dialog.choice();
         QCOMPARE(choice.profile.host, saved.host);
         QVERIFY(choice.profile.guest);
+    }
+
+    void hostingFromTheWindow()
+    {
+        m_window->setLocalServerExecutable(QStringLiteral(OPENTALK_SERVER_EXECUTABLE));
+        QTcpServer probe;
+        QVERIFY(probe.listen(QHostAddress::LocalHost, 0));
+        const quint16 port = probe.serverPort();
+        probe.close();
+
+        ui::LocalServerDialog::Choice choice;
+        choice.name = QStringLiteral("Hosted here");
+        choice.port = port;
+        choice.allowGuests = false;
+        choice.adminName = QStringLiteral("owner");
+        choice.adminPassword = QStringLiteral("owner password");
+        m_window->startLocalServer(choice);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->connection().state() == client::ConnectionState::Connected, 30'000);
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join(QLatin1Char('\n'))));
+        QVERIFY(m_trustQuestions.isEmpty()); // our own server: nothing to confirm
+        QVERIFY(m_window->connection().serverState().selfRole() == protocol::Role::Admin);
+        QVERIFY(m_window->historyText().contains(QStringLiteral("is running on port %1").arg(port)));
+        // The choices (but not the password) are remembered.
+        QCOMPARE(m_settings->value(storage::client::kLocalServerAdminName).toString(), QStringLiteral("owner"));
+
+        m_window->stopLocalServer();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->localServer().state() == client::LocalServer::State::Stopped, 30'000);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->historyText().contains(QStringLiteral("Your server has stopped.")), 10'000);
+        QVERIFY(m_window->connection().state() == client::ConnectionState::Disconnected); // not reconnecting
+        QVERIFY(m_errors.isEmpty());
+    }
+
+    void localServerDialogIsAccessible()
+    {
+        ui::LocalServerDialog dialog(ui::LocalServerDialog::Choice{});
+        dialog.show();
+        const QStringList problems = unnamedFocusableWidgets(&dialog);
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QStringLiteral(", "))));
     }
 
     void createChannelDialogIsAccessible()

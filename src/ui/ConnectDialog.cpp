@@ -14,6 +14,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QShortcut>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -300,6 +301,93 @@ void CreateChannelDialog::accept()
 {
     if (!protocol::isValidName(channelName(), protocol::kMaxChannelNameLength)) {
         complain(this, m_name, tr("Enter a channel name."));
+        return;
+    }
+    QDialog::accept();
+}
+
+// --------------------------------------------------------------- LocalServerDialog
+
+LocalServerDialog::LocalServerDialog(const Choice &initial, QWidget *parent)
+    : QDialog(parent)
+{
+    setWindowTitle(tr("Host a server on this computer"));
+    m_name = new QLineEdit(initial.name);
+    m_name->setMaxLength(static_cast<int>(protocol::kMaxNameLength));
+    m_name->setAccessibleName(tr("Server name"));
+    m_port = new QSpinBox;
+    m_port->setRange(1, 65535);
+    m_port->setValue(initial.port);
+    m_port->setAccessibleName(tr("Port"));
+    m_allowOthers = new QCheckBox(tr("Let &other computers connect"));
+    m_allowOthers->setChecked(initial.allowOtherComputers);
+    const QString othersHelp = tr("Off: only this computer can connect. On: people on your network, or on the "
+                                  "internet if your router forwards the port, can connect. Windows may ask you to "
+                                  "allow opentalk-server through the firewall.");
+    m_allowOthers->setAccessibleDescription(othersHelp);
+    m_allowGuests = new QCheckBox(tr("Let people join as &guests without an account"));
+    m_allowGuests->setChecked(initial.allowGuests);
+    m_adminName = new QLineEdit(initial.adminName);
+    m_adminName->setMaxLength(32);
+    m_adminName->setAccessibleName(tr("Administrator username"));
+    m_adminPassword = new QLineEdit;
+    m_adminPassword->setEchoMode(QLineEdit::Password);
+    m_adminPassword->setAccessibleName(tr("Administrator password"));
+    const QString adminHelp = tr("The first time, this administrator account is created (password of at least 8 "
+                                 "characters). Later, enter the same details to log in as administrator. Leave "
+                                 "both empty to join your server as a guest.");
+    m_adminName->setAccessibleDescription(adminHelp);
+    m_adminPassword->setAccessibleDescription(adminHelp);
+
+    auto *othersLabel = new QLabel(othersHelp);
+    othersLabel->setWordWrap(true);
+    auto *adminLabel = new QLabel(adminHelp);
+    adminLabel->setWordWrap(true);
+    auto *form = new QFormLayout;
+    form->addRow(buddyLabel(tr("Server &name:"), m_name), m_name);
+    form->addRow(buddyLabel(tr("P&ort:"), m_port), m_port);
+    form->addRow(QString(), m_allowOthers);
+    form->addRow(QString(), othersLabel);
+    form->addRow(QString(), m_allowGuests);
+    form->addRow(buddyLabel(tr("Administrator &username:"), m_adminName), m_adminName);
+    form->addRow(buddyLabel(tr("Administrator &password:"), m_adminPassword), m_adminPassword);
+    form->addRow(QString(), adminLabel);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
+    buttons->addButton(tr("&Start server"), QDialogButtonBox::AcceptRole)->setDefault(true);
+    connect(buttons, &QDialogButtonBox::accepted, this, &LocalServerDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    auto *layout = new QVBoxLayout(this);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+    m_name->setFocus();
+}
+
+LocalServerDialog::Choice LocalServerDialog::choice() const
+{
+    return {m_name->text().trimmed(),   static_cast<quint16>(m_port->value()), m_allowOthers->isChecked(),
+            m_allowGuests->isChecked(), m_adminName->text().trimmed(),         m_adminPassword->text()};
+}
+
+void LocalServerDialog::accept()
+{
+    const Choice c = choice();
+    if (c.name.isEmpty()) {
+        complain(this, m_name, tr("Enter a name for the server."));
+        return;
+    }
+    static const QRegularExpression username(QStringLiteral("^[A-Za-z0-9._-]{1,32}$"));
+    if (!c.adminName.isEmpty() && !username.match(c.adminName).hasMatch()) {
+        complain(this, m_adminName,
+                 tr("Usernames are 1 to 32 characters: letters A to Z, digits, dot, underscore or hyphen."));
+        return;
+    }
+    if (!c.adminName.isEmpty() && c.adminPassword.size() < 8) {
+        complain(this, m_adminPassword, tr("The administrator password must be at least 8 characters."));
+        return;
+    }
+    if (c.adminName.isEmpty() && !c.allowGuests) {
+        complain(this, m_adminName,
+                 tr("Enter an administrator account, or allow guests, so that you can join your server."));
         return;
     }
     QDialog::accept();

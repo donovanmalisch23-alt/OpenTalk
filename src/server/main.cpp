@@ -21,9 +21,13 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QPointer>
 #include <QStandardPaths>
 
 #include <cstdio>
+#include <iostream>
+#include <string>
+#include <thread>
 
 #ifndef Q_OS_WIN
 #include <unistd.h>
@@ -191,8 +195,11 @@ int main(int argc, char *argv[])
     const QCommandLineOption deleteOption(QStringLiteral("delete-account"),
                                           QStringLiteral("Delete an account and exit."), QStringLiteral("username"));
     const QCommandLineOption listOption(QStringLiteral("list-accounts"), QStringLiteral("List accounts and exit."));
+    const QCommandLineOption stdinOption(QStringLiteral("stop-when-stdin-closes"),
+                                         QStringLiteral("Shut down gracefully when standard input closes. Used when "
+                                                        "the OpenTalk app runs the server for you."));
     parser.addOptions({dataOption, listenOption, portOption, certOption, keyOption, nameOption, maxOption, guestsOption,
-                       logOption, createOption, roleOption, setPasswordOption, deleteOption, listOption});
+                       logOption, createOption, roleOption, setPasswordOption, deleteOption, listOption, stdinOption});
     parser.process(app);
 
     const std::optional<logging::Level> level = logging::levelFromString(parser.value(logOption));
@@ -298,6 +305,27 @@ int main(int argc, char *argv[])
 
     ShutdownSignal shutdown;
     QObject::connect(&shutdown, &ShutdownSignal::requested, &server, &server::Server::stop);
+    if (parser.isSet(stdinOption)) {
+        // A blocking read on a helper thread works the same on every platform (Windows
+        // cannot watch console or pipe handles with QSocketNotifier).
+        QPointer<server::Server> guard(&server);
+        std::thread([guard] {
+            std::string ignored;
+            while (std::getline(std::cin, ignored)) {
+            }
+            // The guard is only checked on the main thread, where that is safe.
+            if (QCoreApplication *instance = QCoreApplication::instance()) {
+                QMetaObject::invokeMethod(
+                    instance,
+                    [guard] {
+                        if (guard) {
+                            guard->stop();
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+        }).detach();
+    }
     QObject::connect(&server, &server::Server::stopped, &app, &QCoreApplication::quit);
 
     const int code = QCoreApplication::exec();

@@ -165,6 +165,16 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
         }
     });
 
+    m_localServerExecutable = client::LocalServer::defaultExecutable();
+    connect(&m_localServer, &client::LocalServer::stateChanged, this, &MainWindow::updateActions);
+    connect(&m_localServer, &client::LocalServer::started, this, &MainWindow::onLocalServerStarted);
+    connect(&m_localServer, &client::LocalServer::failed, this, [this](const QString &message) {
+        setStatusText(tr("Your server could not start."));
+        reportError(tr("Could not host a server"), message);
+    });
+    connect(&m_localServer, &client::LocalServer::stopped, this,
+            [this] { appendHistory(tr("Your server has stopped.")); });
+
     m_channelTree->showMessage(tr("Not connected to a server"));
     setStatusText(tr("Not connected"));
     updateActions();
@@ -241,6 +251,10 @@ void MainWindow::buildMenus()
     m_connectAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_O));
     m_disconnectAction = serverMenu->addAction(tr("&Disconnect"), this, &MainWindow::disconnectFromServer);
     m_disconnectAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
+    serverMenu->addSeparator();
+    m_hostAction =
+        serverMenu->addAction(tr("&Host a server on this computer..."), this, &MainWindow::openLocalServerDialog);
+    m_stopHostingAction = serverMenu->addAction(tr("&Stop hosting"), this, &MainWindow::stopLocalServer);
 
     QMenu *channelMenu = menuBar()->addMenu(tr("Cha&nnel"));
     m_joinAction = channelMenu->addAction(tr("&Join selected channel"), this, [this] {
@@ -456,6 +470,114 @@ void MainWindow::disconnectFromServer()
     m_connection.disconnectFromServer();
 }
 
+// -------------------------------------------------------------- hosting a server
+
+void MainWindow::openLocalServerDialog()
+{
+    using namespace storage::client;
+    LocalServerDialog::Choice initial;
+    initial.name = m_settings.value(kLocalServerName).toString();
+    initial.port = static_cast<quint16>(m_settings.value(kLocalServerPort).toInt());
+    initial.allowOtherComputers = m_settings.value(kLocalServerAllowOthers).toBool();
+    initial.allowGuests = m_settings.value(kLocalServerAllowGuests).toBool();
+    initial.adminName = m_settings.value(kLocalServerAdminName).toString();
+    LocalServerDialog dialog(initial, this);
+    if (dialog.exec() == QDialog::Accepted) {
+        startLocalServer(dialog.choice());
+    }
+}
+
+void MainWindow::startLocalServer(const LocalServerDialog::Choice &choice)
+{
+    if (m_localServer.state() != client::LocalServer::State::Stopped) {
+        return;
+    }
+    using namespace storage::client;
+    // Remember the choices for next time, but never the password.
+    m_settings.setValue(kLocalServerName, choice.name);
+    m_settings.setValue(kLocalServerPort, static_cast<int>(choice.port));
+    m_settings.setValue(kLocalServerAllowOthers, choice.allowOtherComputers);
+    m_settings.setValue(kLocalServerAllowGuests, choice.allowGuests);
+    m_settings.setValue(kLocalServerAdminName, choice.adminName);
+    if (!m_settings.isReadOnly()) {
+        m_settings.save();
+    }
+
+    m_localChoice = choice;
+    if (choice.adminName.isEmpty()) {
+        launchLocalServer(choice);
+        return;
+    }
+    setStatusText(tr("Preparing your server..."));
+    const QString dataDir = m_paths.dataRoot() + QStringLiteral("/servers/local");
+    QDir().mkpath(dataDir);
+    m_localServer.createAccount(m_localServerExecutable, dataDir, choice.adminName, choice.adminPassword, true,
+                                [this, choice](const QString &error) {
+                                    // An existing account is fine: you are logging in to it again.
+                                    if (!error.isEmpty() && !error.contains(QStringLiteral("already exists"))) {
+                                        setStatusText(tr("Your server could not start."));
+                                        reportError(tr("Could not host a server"),
+                                                    tr("Could not create the administrator account: %1.").arg(error));
+                                        return;
+                                    }
+                                    launchLocalServer(choice);
+                                });
+}
+
+void MainWindow::launchLocalServer(const LocalServerDialog::Choice &choice)
+{
+    client::LocalServer::Options options;
+    options.executable = m_localServerExecutable;
+    options.dataDir = m_paths.dataRoot() + QStringLiteral("/servers/local");
+    QDir().mkpath(options.dataDir);
+    options.name = choice.name;
+    options.port = choice.port;
+    options.allowOtherComputers = choice.allowOtherComputers;
+    options.allowGuests = choice.allowGuests;
+    setStatusText(tr("Starting your server..."));
+    m_localServer.start(options);
+}
+
+void MainWindow::onLocalServerStarted(quint16 port, const QString &fingerprint)
+{
+    if (!m_localChoice) {
+        return;
+    }
+    const LocalServerDialog::Choice choice = *m_localChoice;
+    appendHistory(tr("Your server \"%1\" is running on port %2. Its certificate fingerprint is %3.")
+                      .arg(choice.name)
+                      .arg(port)
+                      .arg(fingerprint));
+    if (choice.allowOtherComputers) {
+        appendHistory(tr("Give other people your computer's address, port %1 and the fingerprint above.").arg(port));
+    }
+    storage::ServerProfile profile;
+    profile.name = choice.name;
+    profile.host = QStringLiteral("127.0.0.1");
+    profile.port = port;
+    profile.guest = choice.adminName.isEmpty();
+    profile.userName = profile.guest ? tr("Host") : choice.adminName;
+    // We started this server ourselves and read its fingerprint directly, so there is
+    // nothing to confirm.
+    profile.pinnedFingerprint = fingerprint;
+    connectToServer(profile, choice.adminPassword, false);
+}
+
+bool MainWindow::isConnectedToLocalServer() const
+{
+    return m_profile && m_profile->host == QLatin1String("127.0.0.1") && m_profile->port == m_localServer.port() &&
+           m_connection.state() != client::ConnectionState::Disconnected;
+}
+
+void MainWindow::stopLocalServer()
+{
+    if (isConnectedToLocalServer()) {
+        m_connection.disconnectFromServer(); // otherwise the app would keep trying to reconnect
+    }
+    setStatusText(tr("Stopping your server..."));
+    m_localServer.stop();
+}
+
 void MainWindow::onConnected()
 {
     const client::ClientState &state = m_connection.serverState();
@@ -577,6 +699,8 @@ void MainWindow::updateActions()
     const Role role = m_connection.serverState().selfRole();
     const auto channelId = m_channelTree->currentChannelId();
     m_disconnectAction->setEnabled(active);
+    m_hostAction->setEnabled(m_localServer.state() == client::LocalServer::State::Stopped);
+    m_stopHostingAction->setEnabled(m_localServer.state() == client::LocalServer::State::Running);
     m_joinAction->setEnabled(connected && channelId.has_value());
     m_createChannelAction->setEnabled(connected && role != Role::Guest);
     m_deleteChannelAction->setEnabled(connected && role == Role::Admin && channelId &&
@@ -785,6 +909,7 @@ void MainWindow::saveLayout()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     m_connection.disconnectFromServer();
+    m_localServer.stop(); // finishes in the background; the destructor waits briefly
     saveLayout();
     if (!m_settings.isReadOnly()) {
         m_settings.save();

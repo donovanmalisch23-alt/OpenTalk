@@ -101,7 +101,7 @@ jobs:
           $out = New-TemporaryFile
           $server = Start-Process -FilePath "$stage/opentalk-server.exe" -NoNewWindow -PassThru `
             -RedirectStandardOutput $out `
-            -ArgumentList "--listen 127.0.0.1 --port 0 --tls-cert tests/data/test-server.crt --tls-key tests/data/test-server.key"
+            -ArgumentList "--data-dir `"$env:RUNNER_TEMP/smoke-data`" --listen 127.0.0.1 --port 0 --allow-guests"
           for ($i = 0; $i -lt 30 -and -not (Select-String -Path $out -Pattern "Press Ctrl" -Quiet); $i++) { Start-Sleep 1 }
           $text = Get-Content $out -Raw
           Write-Host $text

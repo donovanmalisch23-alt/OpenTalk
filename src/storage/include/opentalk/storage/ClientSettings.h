@@ -16,6 +16,11 @@ inline const QString kAnnounceStatusChanges = QStringLiteral("accessibility/anno
 inline const QString kAnnounceMessages = QStringLiteral("accessibility/announceMessages");
 inline const QString kAnnouncePresence = QStringLiteral("accessibility/announcePresence");
 inline const QString kLogLevel = QStringLiteral("diagnostics/logLevel");
+inline const QString kLocalServerName = QStringLiteral("localServer/name");
+inline const QString kLocalServerPort = QStringLiteral("localServer/port");
+inline const QString kLocalServerAllowOthers = QStringLiteral("localServer/allowOtherComputers");
+inline const QString kLocalServerAllowGuests = QStringLiteral("localServer/allowGuests");
+inline const QString kLocalServerAdminName = QStringLiteral("localServer/adminName");
 inline const QString kMainWindowGeometry = QStringLiteral("ui/mainWindowGeometry");
 inline const QString kMainSplitterState = QStringLiteral("ui/mainSplitterState");
 

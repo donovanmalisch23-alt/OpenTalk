@@ -83,4 +83,31 @@ private:
     QCheckBox *m_persistent = nullptr;
 };
 
+/// Settings for hosting a server on this computer.
+class LocalServerDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    struct Choice {
+        QString name;
+        quint16 port = 10350;
+        bool allowOtherComputers = false;
+        bool allowGuests = true;
+        QString adminName; ///< Empty: join as a guest instead.
+        QString adminPassword;
+    };
+
+    explicit LocalServerDialog(const Choice &initial, QWidget *parent = nullptr);
+    Choice choice() const;
+    void accept() override;
+
+private:
+    QLineEdit *m_name = nullptr;
+    QSpinBox *m_port = nullptr;
+    QCheckBox *m_allowOthers = nullptr;
+    QCheckBox *m_allowGuests = nullptr;
+    QLineEdit *m_adminName = nullptr;
+    QLineEdit *m_adminPassword = nullptr;
+};
+
 } // namespace opentalk::ui
