@@ -19,11 +19,12 @@ option(OPENTALK_ENABLE_SANITIZERS "Build with AddressSanitizer and UBSan (GCC/Cl
 
 # Qt 6.4 is the oldest version the code is verified against. Windows release
 # builds use a newer Qt LTS; see docs/development/building.md.
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network Widgets)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network Sql Widgets)
 qt_standard_project_setup()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(OpenTalkCompilerOptions)
+include(OpenTalkDependencies)
 
 add_subdirectory(src)
 add_subdirectory(examples)

@@ -1,0 +1,10 @@
+{
+  "$comment": "Native dependencies for Windows builds (Linux uses system packages). Pinned to one vcpkg commit for reproducible builds; see docs/development/building.md.",
+  "name": "opentalk",
+  "version": "0.1.0",
+  "dependencies": [
+    "libsodium",
+    "openssl"
+  ],
+  "builtin-baseline": "0e5030f583a5427123cd3b714255e5ae62faa3ba"
+}

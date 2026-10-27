@@ -25,18 +25,25 @@ jobs:
         with:
           version: "6.8.3"
           arch: win64_msvc2022_64
-          # OpenSSL 3 for Qt's OpenSSL TLS backend (ADR 0007). Windows 10's Schannel has no TLS 1.3.
-          tools: "tools_opensslv3_x64"
           cache: true
 
-      - name: Put OpenSSL on PATH
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: vcpkg-x64-windows-${{ hashFiles('vcpkg.json') }}
+
+      - name: Set up vcpkg at the pinned commit
         shell: pwsh
         run: |
-          $ssl = Get-ChildItem -Path "$env:RUNNER_WORKSPACE/Qt" -Recurse -Filter libssl-3-x64.dll | Select-Object -First 1
-          if (-not $ssl) { throw "libssl-3-x64.dll not found in the Qt installation" }
-          Write-Host "Using OpenSSL from $($ssl.DirectoryName)"
-          $ssl.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "OPENSSL_BIN=$($ssl.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $sha = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          $root = "$env:RUNNER_TEMP/vcpkg"
+          git clone --quiet https://github.com/microsoft/vcpkg $root
+          git -C $root checkout --quiet $sha
+          & "$root/bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/vcpkg-cache" | Out-Null
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP/vcpkg-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -45,6 +52,14 @@ jobs:
 
       - name: Configure
         run: cmake --preset windows-msvc-release
+
+      - name: Put vcpkg DLLs (OpenSSL, libsodium) on PATH
+        shell: pwsh
+        run: |
+          $bin = (Resolve-Path build/windows-msvc-release/vcpkg_installed/x64-windows/bin).Path
+          if (-not (Test-Path "$bin/libssl-3-x64.dll")) { throw "vcpkg did not provide libssl-3-x64.dll" }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "OPENSSL_BIN=$bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build
         run: cmake --build --preset windows-msvc-release
@@ -66,7 +81,8 @@ jobs:
           }
           windeployqt --release --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw `
             "$stage/OpenTalk.exe" "$stage/opentalk-server.exe" "$stage/opentalk-ping.exe"
-          Copy-Item "$env:OPENSSL_BIN/libssl-3-x64.dll", "$env:OPENSSL_BIN/libcrypto-3-x64.dll" $stage/
+          # OpenSSL and libsodium from vcpkg (the same build the tests used).
+          Copy-Item "$env:OPENSSL_BIN/*.dll" $stage/
           # windeployqt skips Qt's OpenSSL TLS plugin because OpenSSL is not part of Qt; copy it.
           $plugin = Get-ChildItem -Path "$env:RUNNER_WORKSPACE/Qt" -Recurse -Filter qopensslbackend.dll | Select-Object -First 1
           if (-not $plugin) { throw "qopensslbackend.dll not found in the Qt installation" }
@@ -113,7 +129,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev ninja-build clang-format
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev pkg-config ninja-build clang-format
 
       - name: Check formatting
         run: find src tests -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror
@@ -139,7 +155,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev ninja-build clang libclang-rt-18-dev
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev pkg-config ninja-build clang libclang-rt-18-dev
 
       - name: Build fuzzers
         run: |
