@@ -30,6 +30,11 @@ Every document marks features with one of these states, so nothing planned is mi
 - [Moderation and permissions model](security/moderation-model.md)
 - [Licensing policy](licensing/policy.md) and [third-party register](licensing/third-party-register.md)
 
+## Using and extending
+
+- [Server quick start](server-administration/quick-start.md)
+- [SDK guide](sdk/README.md)
+
 ## Development
 
 - [Building and testing](development/building.md)

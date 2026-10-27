@@ -64,13 +64,38 @@ jobs:
             Write-Host "Packaging $($exe.FullName)"
             Copy-Item $exe.FullName $stage/
           }
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
+          windeployqt --release --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw `
             "$stage/OpenTalk.exe" "$stage/opentalk-server.exe" "$stage/opentalk-ping.exe"
           Copy-Item "$env:OPENSSL_BIN/libssl-3-x64.dll", "$env:OPENSSL_BIN/libcrypto-3-x64.dll" $stage/
+          # windeployqt skips Qt's OpenSSL TLS plugin because OpenSSL is not part of Qt; copy it.
+          $plugin = Get-ChildItem -Path "$env:RUNNER_WORKSPACE/Qt" -Recurse -Filter qopensslbackend.dll | Select-Object -First 1
+          if (-not $plugin) { throw "qopensslbackend.dll not found in the Qt installation" }
+          Copy-Item $plugin.FullName "$stage/tls/"
           if (-not (Test-Path "$stage/tls/qopensslbackend.dll")) { throw "Qt's OpenSSL TLS plugin was not deployed" }
           New-Item -ItemType File "$stage/OpenTalk.portable" | Out-Null
           Copy-Item LICENSE "$stage/LICENSE.txt"
           Copy-Item README.md "$stage/README.md"
+
+      - name: Smoke-test the portable package
+        shell: pwsh
+        run: |
+          # Only Windows itself on PATH: the package must not rely on the build machine's Qt or OpenSSL.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $stage = "OpenTalk-portable"
+          $out = New-TemporaryFile
+          $server = Start-Process -FilePath "$stage/opentalk-server.exe" -NoNewWindow -PassThru `
+            -RedirectStandardOutput $out `
+            -ArgumentList "--listen 127.0.0.1 --port 0 --tls-cert tests/data/test-server.crt --tls-key tests/data/test-server.key"
+          for ($i = 0; $i -lt 30 -and -not (Select-String -Path $out -Pattern "Press Ctrl" -Quiet); $i++) { Start-Sleep 1 }
+          $text = Get-Content $out -Raw
+          Write-Host $text
+          $port = [regex]::Match($text, "running on port (\d+)").Groups[1].Value
+          $fingerprint = [regex]::Match($text, "(SHA256:[0-9A-F:]+)").Groups[1].Value
+          if (-not $port) { Stop-Process $server -ErrorAction SilentlyContinue; throw "packaged server did not start" }
+          & "$stage/opentalk-ping.exe" 127.0.0.1 --port $port --fingerprint $fingerprint
+          $code = $LASTEXITCODE
+          Stop-Process $server
+          if ($code -ne 0) { throw "packaged opentalk-ping could not connect (exit code $code)" }
 
       - name: Upload portable build
         uses: actions/upload-artifact@v4

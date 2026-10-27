@@ -4,7 +4,7 @@
 
 OpenTalk lets communities run their own voice and text chat servers, with channels, push-to-talk, moderation tools and plugins, and no central company in the middle. It is inspired by the functionality of TeamTalk 5 but is an independent project with its own protocol, SDK and code, written in C++ with Qt.
 
-> **Status: early development (version 0.1.0).** The desktop window, keyboard navigation, settings and the protocol's base layer exist and are tested. Connecting to servers, voice and text chat are **not implemented yet**. See [docs/status.md](docs/status.md) for exactly what works and what has been verified.
+> **Status: early development (version 0.1.0).** The desktop window, keyboard navigation and settings work. The headless server and the encrypted connection protocol work and are tested, and `opentalk-ping` can check a server. Logging in, channels, text chat and voice are **not implemented yet**, and the desktop app cannot connect to servers yet. See [docs/status.md](docs/status.md) for exactly what works and what has been verified.
 
 ## Principles
 
@@ -22,6 +22,8 @@ OpenTalk lets communities run their own voice and text chat servers, with channe
 2. Unzip it anywhere and run `OpenTalk.exe`. No installation or administrator rights are needed; settings stay in the `data` folder next to it.
 
 Keyboard: **F6** cycles between panes, **Ctrl+1** to **Ctrl+4** jump to channels, users, history and message input, and **F4** opens Settings.
+
+The zip also contains `opentalk-server.exe` and `opentalk-ping.exe`. See the [server quick start](docs/server-administration/quick-start.md).
 
 ## Build from source
 
