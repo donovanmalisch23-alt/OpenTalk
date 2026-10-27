@@ -4,8 +4,10 @@
 // happens here so the components themselves stay independent.
 
 #include "opentalk/logging/Logging.h"
+#include "opentalk/security/Tls.h"
 #include "opentalk/storage/AppPaths.h"
 #include "opentalk/storage/ClientSettings.h"
+#include "opentalk/storage/ServerProfiles.h"
 #include "opentalk/storage/SettingsStore.h"
 #include "opentalk/ui/MainWindow.h"
 
@@ -68,12 +70,25 @@ int main(int argc, char *argv[])
         }
     });
 
-    ui::MainWindow window(settings, paths);
+    storage::ServerProfileStore profiles(paths.serverProfilesFile());
+    const QStringList profileWarnings = profiles.load();
+
+    QString tlsError;
+    const bool tlsReady = security::initializeTls(&tlsError);
+    if (!tlsReady) {
+        qCWarning(lcApp).noquote() << "TLS unavailable:" << tlsError;
+    }
+
+    ui::MainWindow window(settings, paths, profiles);
     window.show();
-    if (!report.warnings.isEmpty()) {
-        // Shown after the window so focus returns to it when the message is dismissed.
-        QMessageBox::warning(&window, QStringLiteral("OpenTalk settings"),
-                             report.warnings.join(QStringLiteral("\n\n")));
+    // Messages are shown after the window so focus returns to it when they are dismissed.
+    QStringList warnings = report.warnings + profileWarnings;
+    if (!tlsReady) {
+        warnings.append(QStringLiteral("Secure connections are not available, so you cannot connect to servers: ") +
+                        tlsError);
+    }
+    if (!warnings.isEmpty()) {
+        QMessageBox::warning(&window, QStringLiteral("OpenTalk"), warnings.join(QStringLiteral("\n\n")));
     }
 
     const int exitCode = QApplication::exec();

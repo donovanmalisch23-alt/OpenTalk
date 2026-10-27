@@ -4,10 +4,12 @@
 
 #include "opentalk/storage/AppPaths.h"
 #include "opentalk/storage/ClientSettings.h"
+#include "opentalk/storage/ServerProfiles.h"
 #include "opentalk/storage/SettingsStore.h"
 #include "opentalk/ui/MainWindow.h"
 #include "opentalk/ui/SettingsDialog.h"
 
+#include <QAbstractSpinBox>
 #include <QAccessible>
 #include <QAction>
 #include <QApplication>
@@ -33,6 +35,11 @@ QStringList unnamedFocusableWidgets(QWidget *root)
         if (widget->focusPolicy() == Qt::NoFocus || !widget->isVisibleTo(root)) {
             continue;
         }
+        // A spin box's internal editor is not exposed separately; the spin box itself is
+        // checked (and named) as its own focusable widget.
+        if (qobject_cast<QAbstractSpinBox *>(widget->parentWidget()) != nullptr) {
+            continue;
+        }
         QAccessibleInterface *iface = QAccessible::queryAccessibleInterface(widget);
         const QString name = iface != nullptr ? iface->text(QAccessible::Name).trimmed() : QString();
         if (name.isEmpty()) {
@@ -52,6 +59,7 @@ private:
     QTemporaryDir m_dir;
     std::unique_ptr<storage::AppPaths> m_paths;
     std::unique_ptr<storage::SettingsStore> m_settings;
+    std::unique_ptr<storage::ServerProfileStore> m_profiles;
 
 private slots:
     void init()
@@ -61,11 +69,12 @@ private slots:
         QFile::remove(m_paths->clientSettingsFile());
         m_settings = std::make_unique<storage::SettingsStore>(storage::client::schema(), m_paths->clientSettingsFile());
         m_settings->load();
+        m_profiles = std::make_unique<storage::ServerProfileStore>(m_paths->serverProfilesFile());
     }
 
     void everyFocusableControlHasAnAccessibleName()
     {
-        ui::MainWindow window(*m_settings, *m_paths);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
         window.show();
         const QStringList problems = unnamedFocusableWidgets(&window);
         QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QStringLiteral(", "))));
@@ -73,7 +82,7 @@ private slots:
 
     void paneShortcutsAreAssignedAndWork()
     {
-        ui::MainWindow window(*m_settings, *m_paths);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
         window.show();
         window.activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(&window));
@@ -92,7 +101,7 @@ private slots:
 
     void f6CyclesThroughPanesInVisualOrder()
     {
-        ui::MainWindow window(*m_settings, *m_paths);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
         window.show();
         window.activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(&window));
@@ -110,7 +119,7 @@ private slots:
 
     void sendingWhileDisconnectedExplainsWhyAndKeepsText()
     {
-        ui::MainWindow window(*m_settings, *m_paths);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
         window.show();
         auto *input = qobject_cast<QLineEdit *>(window.paneWidget(ui::MainWindow::Pane::MessageInput));
         QVERIFY(input != nullptr);
@@ -123,7 +132,7 @@ private slots:
     void closingSavesLayout()
     {
         {
-            ui::MainWindow window(*m_settings, *m_paths);
+            ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
             window.show();
             window.close();
         }

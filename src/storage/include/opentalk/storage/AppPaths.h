@@ -30,6 +30,7 @@ public:
     QString configDir() const;
     QString logDir() const;
     QString clientSettingsFile() const;
+    QString serverProfilesFile() const;
     QString clientLogFile() const;
 
     /// Creates the directories that must exist before the application writes to them.

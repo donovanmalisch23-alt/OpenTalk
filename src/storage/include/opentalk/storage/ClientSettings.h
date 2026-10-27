@@ -13,6 +13,8 @@ inline constexpr int kSchemaVersion = 1;
 // Every key here is used by the application. Add a key only together with the code that reads it.
 inline const QString kRestoreWindowLayout = QStringLiteral("general/restoreWindowLayout");
 inline const QString kAnnounceStatusChanges = QStringLiteral("accessibility/announceStatusChanges");
+inline const QString kAnnounceMessages = QStringLiteral("accessibility/announceMessages");
+inline const QString kAnnouncePresence = QStringLiteral("accessibility/announcePresence");
 inline const QString kLogLevel = QStringLiteral("diagnostics/logLevel");
 inline const QString kMainWindowGeometry = QStringLiteral("ui/mainWindowGeometry");
 inline const QString kMainSplitterState = QStringLiteral("ui/mainSplitterState");

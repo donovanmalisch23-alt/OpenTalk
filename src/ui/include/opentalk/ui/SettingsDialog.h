@@ -55,6 +55,8 @@ private:
 
     QCheckBox *m_restoreLayout = nullptr;
     QCheckBox *m_announceStatus = nullptr;
+    QCheckBox *m_announceMessages = nullptr;
+    QCheckBox *m_announcePresence = nullptr;
     QComboBox *m_logLevel = nullptr;
 };
 

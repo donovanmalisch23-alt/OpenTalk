@@ -25,3 +25,11 @@ target_compile_definitions(tst_chat_session PRIVATE
     OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 add_test(NAME tst_chat_session COMMAND tst_chat_session)
 set_tests_properties(tst_chat_session PROPERTIES TIMEOUT 180)
+
+qt_add_executable(tst_mainwindow_online tst_mainwindow_online.cpp)
+target_link_libraries(tst_mainwindow_online PRIVATE
+    Qt6::Test OpenTalk::Ui OpenTalk::Server OpenTalk::Security OpenTalk::CompilerOptions)
+target_compile_definitions(tst_mainwindow_online PRIVATE
+    OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+add_test(NAME tst_mainwindow_online COMMAND tst_mainwindow_online)
+set_tests_properties(tst_mainwindow_online PROPERTIES TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

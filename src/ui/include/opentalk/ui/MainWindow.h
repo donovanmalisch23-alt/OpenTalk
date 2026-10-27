@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "opentalk/client/Connection.h"
+#include "opentalk/storage/ServerProfiles.h"
+
+#include <QHash>
 #include <QList>
 #include <QMainWindow>
+#include <QTimer>
+
+#include <functional>
+#include <optional>
 
 class QAction;
 class QLabel;
@@ -10,7 +18,6 @@ class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QSplitter;
-class QTreeWidget;
 
 namespace opentalk::storage {
 class AppPaths;
@@ -19,33 +26,71 @@ class SettingsStore;
 
 namespace opentalk::ui {
 
-/// The primary window: channel tree, user list, conversation history, message input
-/// and status bar. Keyboard access:
-///   F6 / Shift+F6   next / previous pane
-///   Ctrl+1 .. Ctrl+4 channels, users, history, message input
-///   F4              settings
+class AnnouncementQueue;
+class ChannelTree;
+
+/// The primary window: channel tree (with the users in each channel), online users,
+/// conversation history, message input and status bar.
+///
+/// Keyboard:
+///   F6 / Shift+F6     next / previous pane
+///   Ctrl+1 .. Ctrl+4  channels, users, history, message input
+///   Ctrl+O / Ctrl+D   connect / disconnect
+///   Enter             in the channel tree: join the channel, or message the user
+///   Ctrl+N            create a channel     Ctrl+P  private message to the selected user
+///   F4                settings
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
     enum class Pane { Channels = 0, Users, History, MessageInput };
 
-    MainWindow(storage::SettingsStore &settings, const storage::AppPaths &paths, QWidget *parent = nullptr);
+    /// What the user is asked when a server's certificate is not yet trusted.
+    struct TrustQuestion {
+        QString serverName;
+        QString host;
+        QString presentedFingerprint;
+        QString previousFingerprint; ///< Non-empty if the certificate changed.
+    };
+    using TrustPrompt = std::function<bool(const TrustQuestion &)>;
+    using ErrorReporter = std::function<void(const QString &title, const QString &text)>;
+
+    MainWindow(storage::SettingsStore &settings, const storage::AppPaths &paths, storage::ServerProfileStore &profiles,
+               QWidget *parent = nullptr);
+    ~MainWindow() override;
 
     /// Shows `text` in the status bar and, if enabled in settings, asks the screen reader
     /// to announce it.
     void setStatusText(const QString &text);
     QString statusText() const;
 
+    /// Connects using a profile. If `save` is true the profile (without password) is
+    /// stored in the server list, including the fingerprint once the user trusts it.
+    void connectToServer(const storage::ServerProfile &profile, const QString &password, bool save);
+
     QWidget *paneWidget(Pane pane) const;
+    ChannelTree *channelTree() const { return m_channelTree; }
+    QString historyText() const;
+    client::Connection &connection() { return m_connection; }
     QAction *settingsAction() const { return m_settingsAction; }
     QList<QAction *> paneActions() const { return m_paneActions; }
+
+    // Hooks that replace dialogs and speech, for automated tests.
+    void setTrustPrompt(TrustPrompt prompt) { m_trustPrompt = std::move(prompt); }
+    void setErrorReporter(ErrorReporter reporter) { m_errorReporter = std::move(reporter); }
+    void setAnnouncementHook(std::function<void(const QString &)> hook) { m_announcementHook = std::move(hook); }
 
 public slots:
     void focusPane(opentalk::ui::MainWindow::Pane pane);
     void focusNextPane();
     void focusPreviousPane();
     void openSettings();
+    void openConnectDialog();
+    void disconnectFromServer();
+    void createChannel();
+    void deleteSelectedChannel();
+    void joinChannel(quint32 channelId);
+    void sendPrivateMessage(quint32 userId);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -57,17 +102,53 @@ private:
     void saveLayout();
     void moveFocusBy(int step);
     void handleMessageInput();
+    void applyAnnouncementSettings();
+    void announce(int category, const QString &text);
+    void appendHistory(const QString &line);
+    void reportError(const QString &title, const QString &text);
+    void updateActions();
+    void scheduleRefresh();
+    void refreshViews();
+    QString serverDisplayName() const;
+    QString userName(quint32 userId) const;
+    QString channelPath(quint32 channelId) const;
+
+    void onConnected();
+    void onDisconnected(const client::DisconnectInfo &info);
+    void onConnectionLost(const client::DisconnectInfo &info, int attempt, int delayMs);
+    void onTextReceived(const protocol::TextMessage &message);
+    void onRequestFinished(quint64 requestId, const std::optional<protocol::Error> &error);
+    void handleUntrustedCertificate(const client::DisconnectInfo &info);
+    static QString friendlyError(const protocol::Error &error);
 
     storage::SettingsStore &m_settings;
     const storage::AppPaths &m_paths;
+    storage::ServerProfileStore &m_profiles;
+    client::Connection m_connection;
+    std::optional<storage::ServerProfile> m_profile;
+    QString m_password;
+    bool m_saveProfile = false;
+    QHash<quint64, QString> m_requestDescriptions;
+
+    TrustPrompt m_trustPrompt;
+    ErrorReporter m_errorReporter;
+    std::function<void(const QString &)> m_announcementHook;
+    AnnouncementQueue *m_announcements = nullptr;
+    QTimer m_refreshTimer;
 
     QSplitter *m_mainSplitter = nullptr;
-    QTreeWidget *m_channelTree = nullptr;
+    ChannelTree *m_channelTree = nullptr;
     QListWidget *m_userList = nullptr;
     QPlainTextEdit *m_history = nullptr;
     QLineEdit *m_messageInput = nullptr;
     QLabel *m_statusLabel = nullptr;
     QAction *m_settingsAction = nullptr;
+    QAction *m_connectAction = nullptr;
+    QAction *m_disconnectAction = nullptr;
+    QAction *m_joinAction = nullptr;
+    QAction *m_createChannelAction = nullptr;
+    QAction *m_deleteChannelAction = nullptr;
+    QAction *m_privateMessageAction = nullptr;
     QList<QAction *> m_paneActions;
 };
 

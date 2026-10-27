@@ -97,6 +97,8 @@ SettingsDialog::SettingsDialog(storage::SettingsStore &settings, const storage::
     loadValues();
     connect(m_restoreLayout, &QCheckBox::toggled, this, &SettingsDialog::updateApplyButton);
     connect(m_announceStatus, &QCheckBox::toggled, this, &SettingsDialog::updateApplyButton);
+    connect(m_announceMessages, &QCheckBox::toggled, this, &SettingsDialog::updateApplyButton);
+    connect(m_announcePresence, &QCheckBox::toggled, this, &SettingsDialog::updateApplyButton);
     connect(m_logLevel, &QComboBox::currentIndexChanged, this, &SettingsDialog::updateApplyButton);
     updateApplyButton();
 
@@ -137,6 +139,15 @@ QWidget *SettingsDialog::createAccessibilityPage()
                                   "currently has no effect.");
 #endif
     form->addWidget(helpText(help, m_announceStatus));
+    m_announceMessages = new QCheckBox(tr("Announce incoming &messages"));
+    form->addWidget(m_announceMessages);
+    form->addWidget(helpText(tr("Speaks channel, private and server messages from other people as they arrive."),
+                             m_announceMessages));
+    m_announcePresence = new QCheckBox(tr("Announce people &joining and leaving"));
+    form->addWidget(m_announcePresence);
+    form->addWidget(helpText(tr("Speaks when people connect, disconnect, or enter or leave your channel. "
+                                "Several changes close together are combined into one announcement."),
+                             m_announcePresence));
     return pageWithHeading(tr("Accessibility"), form);
 }
 
@@ -171,6 +182,8 @@ void SettingsDialog::loadValues()
     using namespace storage::client;
     m_restoreLayout->setChecked(m_settings.value(kRestoreWindowLayout).toBool());
     m_announceStatus->setChecked(m_settings.value(kAnnounceStatusChanges).toBool());
+    m_announceMessages->setChecked(m_settings.value(kAnnounceMessages).toBool());
+    m_announcePresence->setChecked(m_settings.value(kAnnouncePresence).toBool());
     const int index = m_logLevel->findData(m_settings.value(kLogLevel).toString());
     m_logLevel->setCurrentIndex(index >= 0 ? index : 1);
 }
@@ -180,6 +193,8 @@ bool SettingsDialog::hasChanges() const
     using namespace storage::client;
     return m_restoreLayout->isChecked() != m_settings.value(kRestoreWindowLayout).toBool() ||
            m_announceStatus->isChecked() != m_settings.value(kAnnounceStatusChanges).toBool() ||
+           m_announceMessages->isChecked() != m_settings.value(kAnnounceMessages).toBool() ||
+           m_announcePresence->isChecked() != m_settings.value(kAnnouncePresence).toBool() ||
            m_logLevel->currentData().toString() != m_settings.value(kLogLevel).toString();
 }
 
@@ -193,6 +208,8 @@ bool SettingsDialog::apply()
     using namespace storage::client;
     m_settings.setValue(kRestoreWindowLayout, m_restoreLayout->isChecked());
     m_settings.setValue(kAnnounceStatusChanges, m_announceStatus->isChecked());
+    m_settings.setValue(kAnnounceMessages, m_announceMessages->isChecked());
+    m_settings.setValue(kAnnouncePresence, m_announcePresence->isChecked());
     m_settings.setValue(kLogLevel, m_logLevel->currentData().toString());
 
     QString error;
