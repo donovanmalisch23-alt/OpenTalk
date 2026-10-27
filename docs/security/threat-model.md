@@ -33,12 +33,12 @@ Account credentials and session tokens; server admin credentials and TLS private
 | T1 | Malformed or oversized frames crash the parser or exhaust memory (D, E) | TB1, TB2 | Header-first size check, permanent failure after an error, 64 KiB limit; strict CBOR schemas; state-machine checks | Unit tests, TLS integration tests with hostile clients, three fuzzers (**implemented**) |
 | T2 | Eavesdropping or modification in transit (I, T) | TB1, TB2 | TLS 1.3 control channel (**implemented**; TLS 1.2 refused); encrypted and authenticated audio (Phase 4) | `tst_tls_session` |
 | T3 | Server impersonation (S) | TB2 | Certificate pinning (trust on first use) or CA validation; mismatch is refused with an explanation (**implemented**; the confirm-and-remember UI arrives in Phase 3) | `tst_tls_session` (unknown and wrong pins) |
-| T4 | Password guessing, credential stuffing (S) | TB1 | Argon2id; per-account and per-address backoff; optional lockout | Rate-limit tests |
-| T5 | Privilege escalation by forged requests (E) | TB1 | Every operation authorized server-side against the session's account, never against fields sent by the client | A test matrix of "unauthorized role × every admin message" |
-| T6 | Flooding: connections, messages, channel creation, audio (D) | TB1 | Per-address connection cap, total session cap, message token bucket, TLS handshake, Hello and idle timeouts (**implemented**); channel limits later | Unit and integration tests; load tests in Phase 8 |
+| T4 | Password guessing, credential stuffing (S) | TB1 | Argon2id (libsodium, interactive cost) on worker threads; failed logins take the same time for unknown accounts; 10 failures per address in 10 minutes block that address for the window; the connection closes after each failure (**implemented**) | `tst_servercore`, `tst_chat_session` |
+| T5 | Privilege escalation by forged requests (E) | TB1 | Every operation is authorized server-side against the session's role, never against fields sent by the client (**implemented** for the Phase 3 fixed roles) | `tst_servercore` covers each request for each role; `fuzz_server_core` drives arbitrary messages |
+| T6 | Flooding: connections, messages, channel creation, audio (D) | TB1 | Per-address connection cap, total session cap, message token bucket, TLS handshake, Hello and idle timeouts, per-user chat flood limit, at most 1,000 channels and 3 temporary channels per user, Argon2id work limited to 2 threads (**implemented**) | Unit and integration tests; load tests in Phase 8 |
 | T7 | A malicious server sends hostile text or names (T, E) | TB2 | Text is shown as plain text only, never rendered as HTML; length limits and rejection of control and bidirectional-override characters (**implemented** in the codec) | `tst_messages` |
 | T8 | Disclosure through logs or support bundles (I) | All | No passwords, tokens or message contents logged; IP addresses only at the Detailed level; the user reviews a bundle before sharing | Log review; a test that searches logs for test secrets |
-| T9 | Local secret theft (I) | TB3 | Client passwords in Windows Credential Manager; server key and database with user-only file permissions | Manual check; documentation |
+| T9 | Local secret theft (I) | TB3 | Client passwords are **not stored at all** for now (asked on each connect; Credential Manager support planned). Server password hashes are Argon2id. The server key file is owner-only on Unix; on Windows it relies on the per-user data folder's permissions | `tst_certificate`; manual check on Windows |
 | T10 | A plugin abuses its access (I, T, E) | TB4 | Out-of-process plugins, capability grants enforced at the IPC layer, user consent for sensitive capabilities | Phase 6 tests |
 | T11 | Replay of audio packets (T) | TB1 | Sequence numbers with a replay window inside the authenticated encryption | Phase 4 tests |
 | T12 | Protocol downgrade (T) | TB1 | Version chosen from the intersection; the client rejects versions outside its range; TLS 1.3 minimum | `tst_version`, `tst_session`, `tst_tls_session` (**implemented**) |
@@ -55,6 +55,13 @@ Account credentials and session tokens; server admin credentials and TLS private
 - No custom cryptographic algorithms. Only libsodium, OpenSSL or the platform TLS stack, configured from reviewed defaults.
 - Pull requests that touch protocol, authentication, permissions or plugins need a second reviewer once the project has more than one maintainer.
 - Planned before Phase 3 ends: static analysis (clang-tidy and MSVC `/analyze`) in CI, and automated dependency vulnerability alerts.
+
+## Privacy and retention (Phase 3)
+
+- **Text messages** are relayed and **not stored** by the server. Clients keep history only in the open window.
+- **Server database:** usernames, roles, Argon2id password hashes and creation times; persistent channels and their password hashes. Nothing about connections or messages.
+- **Server logs** at the default level: session numbers, client software names, usernames at login, and channel IDs. No IP addresses (Detailed level only), no message text, and no passwords.
+- **Client files:** settings, the saved-server list (name, address, port, username or nickname, trusted fingerprint; no passwords), and the log file.
 
 ## Not promised
 

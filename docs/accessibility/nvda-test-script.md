@@ -33,9 +33,31 @@ Run this on every release candidate with NVDA (latest stable release, default se
 | 15 | Change "Log detail", then press Enter on OK. | The dialog closes and focus returns to the control that was focused before F4. |
 | 16 | Press F4, then Escape. | The dialog closes without saving. |
 
+## Hosting and joining (A-4, A-6, A-7)
+
+| # | Do | Expect |
+|---|---|---|
+| 19 | Server menu (Alt+R) → Host a server on this computer. | The dialog opens on "Server name". Every field reads its name. The help text for "Let other computers connect" and the administrator fields is read as the description. |
+| 20 | Enter an administrator username and a password of 8+ characters, then press Enter. | Within a few seconds: "Connected to … as … You are in …" is announced. Focus is in the channel tree on the server's top channel. Windows may ask about the firewall. |
+| 21 | Arrow through the channel tree. | Channels read as "Name, 2 users, password protected, temporary" where these apply. People read as "name (you), administrator" or "name, guest". |
+| 22 | Press Ctrl+N, type a channel name, and press Enter. | "You are now in …" is announced. The new channel and you inside it appear in the tree. |
+| 23 | Ctrl+4, type a message, and press Enter. | The message box empties. The history (Ctrl+3) ends with "[time] you: message". |
+| 24 | From a second computer or a second copy of OpenTalk (`OpenTalk.exe --data-dir C:\temp\second`), connect to this server as a guest. | On the first computer: "name joined" is announced once. On the second computer: a dialog shows the certificate fingerprint and asks whether to trust it. |
+| 25 | On the second computer, select your user in the Users list and press Enter. Type a message and press Enter. | The first computer announces "Private from name: message" without moving focus. |
+| 26 | Settings (F4) → Accessibility: untick "Announce people joining and leaving". Repeat step 24. | Nothing is announced; the history still shows "joined the server". |
+| 27 | Server menu → Stop hosting. | "Stopping your server" is announced, then "Disconnected". The tree shows "Not connected to a server". |
+
+## Connecting to someone else's server
+
+| # | Do | Expect |
+|---|---|---|
+| 28 | Ctrl+O. | "Connect to a server, dialog", with focus in "Saved servers" (or "Address" if there are none). |
+| 29 | Fill in the address, choose "Guest", enter a nickname, and press Enter. | The trust prompt reads the fingerprint in full. "Trust and connect" connects; Cancel leaves you disconnected with a history line saying why. |
+| 30 | Disconnect, then connect again from Saved servers. | No trust prompt the second time. |
+
 ## Scaling and contrast (A-11)
 
 | # | Do | Expect |
 |---|---|---|
-| 17 | Set Windows scaling to 200% and restart OpenTalk. | All text is visible, nothing overlaps, and the window is usable. |
-| 18 | Turn on a Windows contrast theme. | The application follows the theme and all text is readable. |
+| 31 | Set Windows scaling to 200% and restart OpenTalk. | All text is visible, nothing overlaps, and the window is usable. |
+| 32 | Turn on a Windows contrast theme. | The application follows the theme and all text is readable. |

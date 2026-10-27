@@ -1,6 +1,6 @@
 # Data layout
 
-**Status:** client layout implemented and unit-tested; server layout designed.
+**Status:** client and server layouts implemented and tested.
 
 ## Where the data root is
 
@@ -20,22 +20,36 @@ Nothing is written to the registry, and no administrator rights are needed.
 │   ├── client-settings.json                   Settings (see reference/client-settings.md)
 │   ├── client-settings.json.corrupt-<time>    Damaged file moved aside, if that ever happens
 │   └── client-settings.json.v<N>-backup-<time> Copy made before a format upgrade
-└── logs/
-    └── opentalk-client.log
+│   └── server-profiles.json                   Saved servers (no passwords)
+├── logs/
+│   └── opentalk-client.log
+└── servers/
+    └── local/                                 The server you host from the app (same layout as below)
+```
+
+## Server data folder (implemented)
+
+`opentalk-server --data-dir <folder>` (default: the per-user application data folder of `opentalk-server`):
+
+```
+<folder>/
+├── opentalk.db          SQLite: accounts (username, role, Argon2id hash) and persistent channels
+├── opentalk.db-wal/-shm SQLite working files (write-ahead log)
+├── opentalk.db.v<N>-backup  Copy made before a database upgrade
+└── tls/
+    ├── server.crt       Certificate (created on first start if missing)
+    └── server.key       Private key (owner-only on Linux and macOS)
 ```
 
 ## Planned additions
 
 | Path | Contents | Phase |
 |---|---|---|
-| `config/server-profiles.json` | Saved servers. Passwords are **not** stored here; they go to Windows Credential Manager. | 3 |
-| `config/known-servers.json` | Pinned server certificate fingerprints (trust on first use). | 3 |
+| Windows Credential Manager entries | Optional remembered passwords (today the app asks each time). | later |
 | `soundpacks/<name>/` | User soundpacks with a `soundpack.json` manifest. | 3/4 |
 | `plugins/<id>/` and `config/plugins/<id>.json` | Installed plugins and their settings. | 6 |
-| `servers/<name>/server.json` | Configuration of a locally hosted server. | 3 |
-| `servers/<name>/opentalk.db` | Server database (SQLite): accounts, channels, permissions, sanctions, audit log. | 3/5 |
-| `servers/<name>/tls/` | Server certificate and key, readable by the current user only. | 3/8 |
-| `servers/<name>/backups/` | Database backups. | 8 |
+| Server `opentalk.db` additions | Roles and capabilities, sanctions, audit log. | 5 |
+| Server `backups/` | Database backups. | 8 |
 | `cache/` | Disposable data; safe to delete. | as needed |
 
 A headless server uses the same `servers/<name>/` layout under a directory given with `--data-dir`.

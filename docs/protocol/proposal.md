@@ -1,6 +1,8 @@
 # Protocol specification (version 1, in progress)
 
-**Status:** The control channel's transport (TLS 1.3), framing, session messages, handshake, heartbeats, timeouts, rate limiting and errors are **implemented, unit-tested, integration-tested over TLS and fuzzed** (`src/protocol`, `src/client`, `src/server`). Authentication, channels, text and audio are **designed**. See [ADR 0005](../architecture/decisions/0005-transport-and-serialization.md) and [ADR 0007](../architecture/decisions/0007-openssl-tls-backend.md).
+**Status:** The control channel is **implemented, unit-tested, integration-tested over TLS and fuzzed** (`src/protocol`, `src/client`, `src/server`). That covers TLS 1.3, framing, the handshake, heartbeats, timeouts, rate limiting, errors, login, channels, presence and text. Audio is **designed** (Phase 4).
+
+Protocol version 1 has not been released, so it was extended in Phase 3 rather than bumped. From the first public release on, the compatibility policy at the end of this document applies. See [ADR 0005](../architecture/decisions/0005-transport-and-serialization.md) and [ADR 0007](../architecture/decisions/0007-openssl-tls-backend.md).
 
 ## Goals
 
@@ -21,7 +23,7 @@ Both ports are configurable. Port 10350 is a provisional choice, not an IANA ass
 
 ### Server identity
 
-Most self-hosted servers will use self-signed certificates. The client therefore uses **trust on first use**. On first connection it shows the certificate fingerprint and asks the user to trust it. After that, the fingerprint is pinned per server profile, and a mismatch blocks the connection with a clear warning. Certificates from a public CA (for example Let's Encrypt) are validated normally and also work.
+Most self-hosted servers use self-signed certificates; `opentalk-server` creates one on first start. The client therefore uses **trust on first use**. On first connection it shows the certificate fingerprint and asks the user to trust it. After that, the fingerprint is pinned per server profile, and a mismatch blocks the connection with a clear warning. Certificates from a public CA (for example Let's Encrypt) are validated normally and also work.
 
 ## Framing
 
@@ -55,7 +57,7 @@ Client                                   Server
 ```
 
 - **Version negotiation:** the client sends a range and the server answers with one version. The client rejects any version outside its own range, which prevents silent downgrades. **Implemented.**
-- **Authentication** (Phase 3) will follow Welcome. In protocol version 1 as implemented today there is no login yet, so every connection is anonymous.
+- **Login:** after Welcome the client sends `Authenticate` (an account and password, or a guest nickname). The server answers `AuthResult`, then `StateSnapshot`, and tells everyone else with `UserJoined`. Until login succeeds, only `Authenticate` (plus Ping, Pong and Goodbye) is accepted. A failed login gets `Error{AuthenticationFailed}` and the connection is closed. The message is the same whether the account exists or not.
 - **Requests and responses:** every client request carries a `requestId` (an unsigned integer chosen by the client), and the response echoes it. Server-initiated events have no `requestId`.
 - **State machine:** the server accepts only the messages valid in the current session state (for example nothing but `Hello` before `Hello`). Anything else gets `Error{ProtocolViolation}` and the connection is closed.
 - **Reconnection:** the client retries with exponential backoff (1, 2, 4 … up to 30 seconds, with jitter). A short-lived resume token from `AuthResult` lets it rejoin its channel without asking for the password again.
@@ -64,7 +66,7 @@ Client                                   Server
 
 | Range | Group |
 |---|---|
-| 0x0001–0x00FF | Session: Hello, Welcome, Authenticate, AuthResult, Ping, Pong, Goodbye, Error |
+| 0x0001–0x00FF | Session: Hello, Welcome, Ping, Pong, Goodbye, Error, Authenticate, AuthResult |
 | 0x0100–0x01FF | Channels: StateSnapshot, Join, Leave, Create, Update, Delete, and their events |
 | 0x0200–0x02FF | Users and presence |
 | 0x0300–0x03FF | Text messages |
@@ -77,7 +79,7 @@ Unknown message types get `Error{UnknownMessage}` but the connection is **not** 
 
 ## Session messages (implemented)
 
-Payloads are CBOR maps with small integer keys. Keys are scoped to each message type. Receivers ignore keys they do not know. Every field below is required unless marked optional.
+Payloads are CBOR maps with small integer keys. Clients accept server payloads up to 1 MiB (for state snapshots). Servers accept up to the limit they announce (64 KiB). Keys are scoped to each message type. Receivers ignore keys they do not know. Every field below is required unless marked optional.
 
 | Type | Name | Direction | Fields (key: name, type) |
 |---|---|---|---|
@@ -104,11 +106,62 @@ Payloads are CBOR maps with small integer keys. Keys are scoped to each message 
 | TLS handshake timeout (server) | 10 s |
 | Shutdown | Server sends Goodbye{ServerShuttingDown} to everyone, waits up to 3 s, then closes |
 
-**Error and Goodbye codes:** 0 None, 1 ProtocolViolation, 2 UnsupportedVersion, 3 UnknownMessage, 4 MalformedMessage, 5 RateLimited, 6 ServerFull, 7 Timeout, 8 ServerShuttingDown, 9 InternalError. Codes are never renumbered. Unknown codes from newer peers are treated as InternalError. Further codes (authentication, permissions) arrive with the features that need them.
+**Error and Goodbye codes:** 0 None, 1 ProtocolViolation, 2 UnsupportedVersion, 3 UnknownMessage, 4 MalformedMessage, 5 RateLimited, 6 ServerFull, 7 Timeout, 8 ServerShuttingDown, 9 InternalError, 10 AuthenticationFailed, 11 NotAuthorized, 12 NotFound, 13 ChannelFull, 14 WrongChannelPassword, 15 InvalidRequest, 16 NameInUse. Codes are never renumbered. Unknown codes from newer peers are treated as InternalError.
+
+Welcome also carries 6: guests allowed (bool, optional).
+
+## Login, channels, presence and text (implemented, Phase 3)
+
+| Type | Name | Direction | Fields |
+|---|---|---|---|
+| 0x0007 | Authenticate | C→S | 1: mode (0 account, 1 guest), 2: name, 3: password (account mode only; up to 1024 characters, any characters) |
+| 0x0008 | AuthResult | S→C | 1: your user ID, 2: display name, 3: role (0 guest, 1 user, 2 admin) |
+| 0x0100 | StateSnapshot | S→C | 1: array of channels, 2: array of users (at most 10,000 each) |
+| 0x0101 | ChannelAdded | S→C | a channel (fields below) |
+| 0x0102 | ChannelRemoved | S→C | 1: channel ID |
+| 0x0110 | JoinChannel | C→S | 1: request ID, 2: channel ID, 3: password (optional) |
+| 0x0111 | CreateChannel | C→S | 1: request ID, 2: parent ID, 3: name, 4: topic (optional), 5: persistent (bool, optional), 6: password (optional), 7: maximum users (optional, 0 = no limit) |
+| 0x0112 | DeleteChannel | C→S | 1: request ID, 2: channel ID |
+| 0x0120 | RequestDone | S→C | 1: request ID, 2: result ID (optional, for example a new channel's ID) |
+| 0x0200 | UserJoined | S→C | a user (fields below) |
+| 0x0201 | UserLeft | S→C | 1: user ID |
+| 0x0202 | UserMoved | S→C | 1: user ID, 2: channel ID |
+| 0x0300 | SendText | C→S | 1: request ID, 2: target (0 channel, 1 user, 2 whole server), 3: target ID, 4: text |
+| 0x0301 | TextMessage | S→C | 1: target, 2: sender's user ID, 3: target ID, 4: text, 5: server time (ms since 1970, UTC) |
+
+**Channel** fields: 1: ID, 2: parent ID (0 only for the root), 3: name (empty only for the root), 4: topic, 5: persistent, 6: has password, 7: maximum users. **User** fields: 1: ID, 2: name, 3: role, 4: channel ID.
+
+**IDs.** User IDs are per connection and valid until the user disconnects; they are not account IDs. Channel 1 is the root. Persistent channels have IDs from 1000 and keep them across restarts. Temporary channels have IDs from 0x80000000.
+
+**Requests** are answered by either `RequestDone` or `Error` with the same request ID. Every request is authorized by the server. The client hiding a menu item is never the security check.
+
+**Rules the server enforces** (Phase 3 fixed roles; configurable roles come in Phase 5):
+
+| Action | Guest | User | Admin |
+|---|---|---|---|
+| Join channels, send channel and direct messages | yes | yes | yes |
+| Create temporary channels (at most 3 at a time) | no | yes | yes |
+| Create persistent channels, delete channels | no | no | yes |
+| Send server-wide messages | no | no | yes |
+| Ignore channel passwords and user limits | no | no | yes |
+
+- You can only write to the channel you are in. Direct messages go to one online user. The server echoes every message back to its sender with the server's time stamp.
+- A temporary channel's creator moves into it. A temporary channel disappears when its last user leaves, and it cannot have sub-channels.
+- Deleting a channel moves its users to the root first. A channel with sub-channels cannot be deleted.
+- Channel names are unique among siblings, ignoring case.
+- Guest nicknames may not match an account name or an online user's name (ignoring case).
+
+**Text rules:** names (users, channels) are 1–32 or 1–64 characters, without control or invisible formatting characters, and without spaces at either end. Chat text is up to 2,000 characters. Newlines and tabs are allowed. Other control characters, and the bidirectional override and isolate characters (U+202A–U+202E, U+2066–U+2069) that can make text read differently from how it is stored, are rejected. Emoji sequences that use the zero-width joiner are allowed.
+
+**Flood control:** besides the 50 messages per second session limit, each user may send about 1 text message per second, in bursts of up to 5. Extra messages get `Error{RateLimited}` and the connection stays open.
+
+**Login protection:** passwords are checked with Argon2id on worker threads, so the server stays responsive. Unknown usernames are checked against a dummy hash, so a failed login takes the same time either way. After 10 failed logins from one IP address within 10 minutes, further attempts from that address are refused for the rest of the window.
+
+**Retention:** the server relays text messages and **does not store them**. Message history exists only in each client's window for that session.
 
 ## Errors
 
-Each `Error` has a numeric `code`, the `requestId` it answers (if any), and a short English `detail` meant for logs. The client builds its user-facing, translatable text from the code. The implemented codes are listed above. Planned additions: `AuthenticationFailed`, `NotAuthorized`, `NotFound`, `ChannelFull`, `WrongChannelPassword`, `Banned` (with expiry if temporary).
+Each `Error` has a numeric `code`, the `requestId` it answers (if any), and a short English `detail` meant for logs. The client builds its user-facing, translatable text from the code. All implemented codes are listed above. Planned: `Banned` (with expiry if temporary) in Phase 5.
 
 ## Audio packets (designed)
 

@@ -1,6 +1,6 @@
 # OpenTalk SDK
 
-**Status: draft (SDK 0.1).** It is implemented and covered by tests through the `opentalk-ping` example. It can connect, show server information, measure round-trip time and disconnect. Channels, users, text and audio are added as the server gains them.
+**Status: draft (SDK 0.2).** It is implemented and covered by tests through the `opentalk-ping` example. It can log in (account or guest), list channels and users, join channels, send and receive channel and private messages, reconnect automatically, and measure round-trip time. Audio is added in Phase 4.
 
 The SDK is the supported way for bots, tools and other programs to talk to OpenTalk servers. The OpenTalk desktop application is built on the same internal libraries.
 
@@ -16,16 +16,28 @@ if (!opentalk::sdk::Client::initialize(&error)) { /* TLS 1.3 unavailable */ }
 
 opentalk::sdk::Client client;
 client.setApplication("my-bot", "1.0");
-QObject::connect(&client, &opentalk::sdk::Client::connected, [](const opentalk::sdk::ServerInfo &s) {
-    qInfo() << "connected to" << s.name;
+QObject::connect(&client, &opentalk::sdk::Client::connected, [&](const opentalk::sdk::ServerInfo &s) {
+    qInfo() << "connected to" << s.name << "with" << client.users().size() << "users";
+    client.sendChannelMessage("Hello from a bot!");
+});
+QObject::connect(&client, &opentalk::sdk::Client::textReceived, [](const opentalk::sdk::TextMessage &m) {
+    qInfo() << m.fromName << "said" << m.text;
 });
 QObject::connect(&client, &opentalk::sdk::Client::disconnected, [](const opentalk::sdk::DisconnectReason &r) {
     qInfo() << "disconnected:" << r.message;
 });
-client.connectToServer({"chat.example.org", 10350}, {"SHA256:AB:CD:..."});
+opentalk::sdk::Login login;
+login.mode = opentalk::sdk::Login::Mode::Account; // or Guest, with just a name
+login.name = "bot";
+login.password = readPasswordFromSomewhereSafe();
+client.connectToServer({"chat.example.org", 10350}, {"SHA256:AB:CD:..."}, login);
 ```
 
 A complete program is in [`examples/opentalk-ping`](../../examples/opentalk-ping/main.cpp).
+
+## Bots and permissions
+
+A bot is an ordinary account (or guest) and gets exactly the permissions of its role; being a program gives it nothing extra. Create a dedicated account for each bot.
 
 ## Server identity
 

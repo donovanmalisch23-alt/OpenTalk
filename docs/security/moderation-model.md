@@ -1,6 +1,6 @@
 # Moderation and permissions model
 
-**Status:** Designed (Phase 5). This is a pure-logic component (`src/moderation`) that the server calls for every decision, so it can be tested exhaustively without networking.
+**Status:** Designed (Phase 5). Phase 3 implemented a first step: three fixed roles (guest, user, administrator) enforced by `ServerCore`, with the permission table in the [protocol document](../protocol/proposal.md#login-channels-presence-and-text-implemented-phase-3). The full model below replaces those fixed roles. It is a pure-logic component (`src/moderation`) that the server calls for every decision, so it can be tested exhaustively without networking.
 
 ## Identities
 

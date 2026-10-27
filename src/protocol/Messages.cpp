@@ -231,7 +231,7 @@ private:
         // Unsigned 64-bit values above INT64_MAX arrive as non-integers in QCborValue,
         // so every accepted value fits in qint64 here.
         const qint64 v = value.toInteger();
-        if (v < 0 || static_cast<quint64>(v) > std::numeric_limits<Int>::max()) {
+        if (v < 0 || static_cast<quint64>(v) > static_cast<quint64>(std::numeric_limits<Int>::max())) {
             fail(name, "out of range");
             return std::nullopt;
         }
