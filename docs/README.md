@@ -24,7 +24,7 @@ Every document marks features with one of these states, so nothing planned is mi
 - [Architecture overview](architecture/overview.md) and [decision records](architecture/decisions/)
 - [Data layout](architecture/data-layout.md)
 - [Dependency evaluation](dependencies.md)
-- [Protocol proposal](protocol/proposal.md)
+- [Protocol proposal](protocol/proposal.md) and [voice transport](protocol/voice.md)
 - [Accessibility plan](accessibility/plan.md) and [NVDA test script](accessibility/nvda-test-script.md)
 - [Threat model and security plan](security/threat-model.md)
 - [Moderation and permissions model](security/moderation-model.md)
@@ -32,7 +32,9 @@ Every document marks features with one of these states, so nothing planned is mi
 
 ## Using and extending
 
+- [Voice and sounds (user guide)](user-guide/voice-and-sounds.md)
 - [Server quick start](server-administration/quick-start.md)
+- [Audio benchmarks](audio/benchmarks.md)
 - [SDK guide](sdk/README.md)
 
 ## Development

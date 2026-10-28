@@ -230,6 +230,8 @@ void Server::acceptConnection(qintptr socketDescriptor)
         socket->deleteLater();
         return;
     }
+    // Send small messages (and tunnelled voice) at once instead of batching them.
+    socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
     const QHostAddress address = socket->peerAddress();
     int &fromAddress = m_connectionsPerAddress[address];
     if (fromAddress >= m_config.maxConnectionsPerAddress) {

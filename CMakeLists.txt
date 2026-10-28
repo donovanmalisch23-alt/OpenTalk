@@ -28,6 +28,7 @@ include(OpenTalkDependencies)
 
 add_subdirectory(src)
 add_subdirectory(examples)
+add_subdirectory(tools)
 
 if(OPENTALK_BUILD_TESTS)
     enable_testing()

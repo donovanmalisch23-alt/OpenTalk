@@ -196,6 +196,8 @@ void Connection::onSslErrors(const QList<QSslError> &errors)
 void Connection::onEncrypted()
 {
     m_connectTimer.stop();
+    // Send small messages (and tunnelled voice) at once instead of batching them.
+    m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
     // A certificate that passed normal validation never triggers sslErrors(), so the
     // pin must also be checked here.
     const security::TrustEvaluation evaluation =

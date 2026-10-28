@@ -142,9 +142,10 @@ private slots:
         JitterBuffer jb;
         QByteArray p;
         QByteArray fec;
+        QCOMPARE(jb.targetFrames(), JitterBuffer::kMinTarget);
         jb.insert(10, packet(10), 0);
-        jb.insert(12, packet(12), 40);                            // out of order
         QVERIFY(jb.pop(&p, &fec) == JitterBuffer::Result::Empty); // still buffering
+        jb.insert(12, packet(12), 40);                            // out of order
         jb.insert(11, packet(11), 41);
         QVERIFY(jb.pop(&p, &fec) == JitterBuffer::Result::Packet);
         QCOMPARE(id(p), 10);
@@ -222,6 +223,41 @@ private slots:
         QVERIFY(jb.pop(&p, &fec) == JitterBuffer::Result::Packet);
         QVERIFY(jb.bufferedFrames() <= jb.targetFrames() + 4);
         QVERIFY(id(p) > 0); // the oldest frames were skipped
+    }
+
+    void growsWhenPacketsComeTooLateAndShrinksWhenSteady()
+    {
+        JitterBuffer jb;
+        QByteArray p;
+        QByteArray fec;
+        jb.insert(0, packet(0), 0);
+        jb.insert(1, packet(1), 20);
+        QVERIFY(jb.pop(&p, &fec) == JitterBuffer::Result::Packet); // 0
+        QVERIFY(jb.pop(&p, &fec) == JitterBuffer::Result::Packet); // 1
+        QVERIFY(jb.pop(&p, &fec) == JitterBuffer::Result::Lost);   // 2 has not arrived
+        const int before = jb.targetFrames();
+        jb.insert(2, packet(2), 70); // arrives after it was concealed
+        QCOMPARE(jb.latePackets(), 1);
+        QCOMPARE(jb.targetFrames(), before + 1);
+        jb.insert(3, packet(3), 71);
+        // The next frame is a stretch (concealment without skipping), then playback goes on.
+        QVERIFY(jb.pop(&p, &fec) == JitterBuffer::Result::Lost);
+        QVERIFY(jb.pop(&p, &fec) == JitterBuffer::Result::Packet);
+        QCOMPARE(id(p), 3);
+
+        // A steady stream with extra packets queued: the buffer drops one frame per window.
+        JitterBuffer steady;
+        int sequence = 0;
+        for (; sequence < 6; ++sequence) {
+            steady.insert(static_cast<quint16>(sequence), packet(sequence & 0x7f), sequence * 20);
+        }
+        const int startBuffered = steady.bufferedFrames();
+        for (int tick = 0; tick < 3 * JitterBuffer::kAdaptWindowFrames; ++tick, ++sequence) {
+            steady.insert(static_cast<quint16>(sequence), packet(sequence & 0x7f), sequence * 20);
+            QVERIFY(steady.pop(&p, &fec) == JitterBuffer::Result::Packet);
+        }
+        QVERIFY(steady.bufferedFrames() < startBuffered);
+        QVERIFY(steady.bufferedFrames() >= JitterBuffer::kMinTarget - 1);
     }
 
     void sequenceNumbersWrapAround()

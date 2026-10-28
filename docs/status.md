@@ -1,10 +1,18 @@
 # Status and verification report
 
-**Last updated:** 2026-10-27. Phases 0, 2 and 3 are complete. Phase 1 is complete except the manual NVDA pass and the application icon.
+**Last updated:** 2026-10-28. Phases 0, 2, 3 and 4 are complete. Still open: the manual NVDA pass, the application icon, and checks of Phase 4 on real sound hardware.
 
 ## What works today
 
-People can host a server from the app or run `opentalk-server` on its own. Then they can log in with an account or as a guest, see channels and who is in them, join, create and delete channels (by role), and send channel, private and server-wide text messages. Everything goes over TLS 1.3 with certificate pinning. **There is no voice yet** (Phase 4).
+People can host a server from the app or run `opentalk-server` on its own. Then they can log in with an account or as a guest, see channels and who is in them, join, create and delete channels (by role), and send channel, private and server-wide text messages. Everything goes over TLS 1.3 with certificate pinning.
+
+**Voice (Phase 4):**
+
+- Everyone in a channel can talk, with push-to-talk (a global key on Windows), voice activation or always-on.
+- Microphone mute, mute all, per-person volume, and talking indicators in the channel list.
+- Event sounds and soundpacks.
+- Voice is encrypted over UDP and falls back to the main connection when UDP is blocked.
+- It is tested end to end with synthetic sound devices. **It has not yet been tried with real sound hardware.**
 
 | Area | State | Evidence |
 |---|---|---|
@@ -19,14 +27,20 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Hosting a server from the app | Integration-tested against the real program | `tst_local_server`; `tst_mainwindow_online` hosting test |
 | Main window connected to a real server: trust prompt, tree, chat, private messages, announcements, accessible names | Integration-tested (offscreen) | `tst_mainwindow_online` (10) |
 | Announcement spacing and coalescing | Unit-tested | `tst_announcements` |
-| All tests under AddressSanitizer and UBSan | Passing (19 test programs) | `linux-asan` preset in CI |
-| Portable Windows zip | Built and smoke-tested in CI | The smoke test generates a certificate and logs in with only Windows on `PATH` |
-| NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 32 steps |
+| Audio engine: Opus, jitter buffer, mixing, voice activation, push-to-talk, mute, deafen, user volume, device recovery | Unit-tested with a synthetic sound device (tone detection) | `tst_audio_core` (17), `tst_audio_engine` (9) |
+| Voice encryption, forwarding and fallback | Unit-tested, fuzzed and integration-tested over real sockets | `tst_packetcipher` (10), `tst_voicerouter` (10), `tst_voice_session` (5 tests: UDP, TCP fallback, a server without UDP, channel isolation, a tone travelling end to end); `fuzz_voice_router` (434,200 inputs locally, no failures) |
+| Voice in the app: push-to-talk key, audio menu, settings pages, talking indicators, per-user volume | Unit- and integration-tested (offscreen) | `tst_pushtotalk` (10), `tst_mainwindow` (11), `tst_mainwindow_online` voice test |
+| Audio performance | Measured on a VM without sound hardware | [Benchmarks](audio/benchmarks.md) |
+| Voice with real microphones and speakers on Windows | **Not yet verified** | Needs `opentalk-audio-bench device-loopback` and a listening test |
+| All tests under AddressSanitizer and UBSan | Passing (25 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
+| Portable Windows zip | Built and smoke-tested in CI | With only Windows on `PATH`, the smoke test generates a certificate, logs in, runs the Opus benchmark and sends voice through a server |
+| NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 45 steps |
 | Ctrl+C shutdown of `opentalk-server` in a Windows console | **Not yet verified manually** | Shutdown when the app closes the server's input is tested on Windows CI |
 
 ## Known limitations
 
-- No voice, sounds, moderation beyond the three fixed roles, or server-side message history (by design for now: messages are not stored).
+- Moderation is limited to the three fixed roles (Phase 5). There is no server-side message history (by design for now: messages are not stored).
+- Voice has not been tried on real sound hardware. Push-to-talk works globally only on Windows; elsewhere it works while OpenTalk's window is in front.
 - Passwords are not remembered; the app asks on each connect.
 - The packaged OpenSSL (3.6.5) series ends support around November 2026. A supported LTS is required before a public release ([ADR 0007](architecture/decisions/0007-openssl-tls-backend.md)).
 - The Windows server's private key relies on the user's data folder permissions; no extra access-control list is set yet.
@@ -34,9 +48,11 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 ## Commands that were run (Linux sandbox, Ubuntu 24.04)
 
 ```sh
-cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 19/19 pass
-cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 19/19 pass
-cmake --preset linux-fuzz  && cmake --build --preset linux-fuzz                                 # 4 fuzzers
+cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 25/25 pass
+cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 25/25 pass
+cmake --preset linux-fuzz  && cmake --build --preset linux-fuzz                                 # 5 fuzzers
+build/linux-fuzz/tests/fuzz/fuzz_voice_router -max_total_time=60 corpus/                        # no failures
+build/linux-release/tools/audio-bench/opentalk-audio-bench all                                  # docs/audio/benchmarks.md
 for i in $(seq 10); do build/linux-debug/tests/integration/tst_chat_session; done               # 0 failures
 ```
 
@@ -50,6 +66,7 @@ Windows results come from the CI runs linked on the pull request.
 
 ## Open items for the owner
 
-1. Run the [NVDA test script](accessibility/nvda-test-script.md) on the portable zip. Steps 19–30 cover hosting, joining and chatting.
-2. Switch the repository's default branch to `main` (Settings → General → Default branch).
-3. Paste the repository description and enable private vulnerability reporting (Settings → Security).
+1. Run the [NVDA test script](accessibility/nvda-test-script.md) on the portable zip. Steps 19–30 cover hosting, joining and chatting; steps 33–43 cover voice.
+2. With headphones (or a cable from output to input), try voice with a second person and run `opentalk-audio-bench device-loopback`; please record the result in an issue.
+3. Switch the repository's default branch to `main` (Settings → General → Default branch).
+4. Paste the repository description and enable private vulnerability reporting (Settings → Security).

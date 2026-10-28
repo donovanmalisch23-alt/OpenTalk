@@ -54,11 +54,22 @@ Deliverables: [project brief](project-brief.md), [risk assessment](risk-assessme
 
 **Exit criterion met (automated):** two or more clients on a server log in, browse channels, join, create and delete channels, and exchange channel and private messages. This is tested both with the client library and with the real main window. Remaining for full sign-off: the NVDA pass.
 
-## Phase 4: Audio
+## Phase 4: Audio (done, except checks that need sound hardware)
 
-Starts with a **spike**: compare miniaudio, Qt Multimedia and raw WASAPI for latency, dropouts and device hot-plug, and decide audio encryption (DTLS or AEAD) with an ADR. Then: capture, Opus, UDP transport, jitter buffer, playback and mixing, push-to-talk (global hotkey), voice activation, mute and deafen, volumes, device selection and recovery, TCP fallback, a benchmark harness, and **event sounds** with an original soundpack.
+| ID | Milestone | Status |
+|---|---|---|
+| M4.1 | Audio library decision and encryption decision | Done: miniaudio and Opus ([ADR 0009](architecture/decisions/0009-audio-io-miniaudio.md)); XChaCha20-Poly1305 with keys over TLS ([ADR 0008](architecture/decisions/0008-voice-encryption.md)). Qt Multimedia and raw WASAPI were compared on features, not built |
+| M4.2 | Audio engine: capture, Opus with FEC, adaptive jitter buffer, mixing, soft clipping, voice activation, mute, deafen, per-user volume, device recovery | Done; tested end to end with a synthetic device (`tst_audio_core`, `tst_audio_engine`) |
+| M4.3 | Encrypted UDP voice, forwarding by the server, automatic TCP fallback, flood limits | Done; `tst_packetcipher`, `tst_voicerouter`, `tst_voice_session`, `fuzz_voice_router` |
+| M4.4 | Desktop app: Audio and Sounds settings, push-to-talk key (global on Windows), Ctrl+T, Ctrl+M, Ctrl+Shift+M, talking indicators, per-user volume, event sounds, soundpacks | Done; `tst_pushtotalk`, `tst_mainwindow`, `tst_mainwindow_online` (the real window talking with another client) |
+| M4.5 | Benchmark harness and published numbers | Done: `opentalk-audio-bench` and [benchmarks](audio/benchmarks.md). The measurements led to two fixes: a shorter adaptive jitter buffer and `TCP_NODELAY` |
+| M4.6 | Latency, dropouts and hot-plug on real Windows sound hardware; NVDA steps 33–43 | **Open: needs a person with hardware** (`opentalk-audio-bench device-loopback` and the [NVDA script](accessibility/nvda-test-script.md)) |
 
-**Exit:** several clients exchange clear voice, with measured latency, CPU and loss-tolerance numbers published alongside the test setup.
+**Exit criterion:** "several clients exchange clear voice, with measured latency, CPU and loss-tolerance numbers published alongside the test setup."
+
+- **Met in software:** several clients exchange voice through a real server in automated tests, which detect the transmitted tone at the far end.
+- **Numbers published:** CPU, jitter and loss tolerance, and network latency are in [benchmarks](audio/benchmarks.md), together with the test setup.
+- **Not yet measured:** device latency and listening quality on real hardware.
 
 ## Phase 5: Administration and moderation
 

@@ -55,9 +55,27 @@ Run this on every release candidate with NVDA (latest stable release, default se
 | 29 | Fill in the address, choose "Guest", enter a nickname, and press Enter. | The trust prompt reads the fingerprint in full. "Trust and connect" connects; Cancel leaves you disconnected with a history line saying why. |
 | 30 | Disconnect, then connect again from Saved servers. | No trust prompt the second time. |
 
+## Voice (Phase 4)
+
+Use headphones, or two computers, so voices do not feed back into the microphone.
+
+| # | Do | Expect |
+|---|---|---|
+| 33 | F4 → Audio (Ctrl+Tab to reach it). Tab through the page. | Every control reads its name and help: Microphone, Speakers or headphones, volumes "in percent", "How to talk", "Push-to-talk key, None (use Ctrl+T to talk)", Voice activation level, Voice quality, the UDP checkbox. The level meter is skipped (not focusable); "Microphone level: … dB" can be read with NVDA's review cursor. |
+| 34 | Press "Change key…", then press and release Control+F12. | The dialog closes; the field reads "Ctrl+F12". Escape in that dialog cancels without changing anything. |
+| 35 | OK. Connect to a server with a second person in the same channel. Hold Control+F12 and speak; release it. | A click at the start and end. The other person hears you. The status bar's voice field reads "Talking" while held. NVDA says nothing extra. |
+| 36 | Switch to another program (Alt+Tab) and hold Control+F12. | It still transmits (Windows global push-to-talk). |
+| 37 | The other person talks. Move to their name in the channel tree. | Their name reads normally (no repeated re-reading while they talk). NVDA+Tab or the description (NVDA+Shift+D in some configurations) includes "talking". |
+| 38 | F4 → Accessibility → tick "Announce who starts talking". The other person talks. | "name talking" is spoken once per talk spurt. |
+| 39 | Press Ctrl+M, then Ctrl+M again. | "Microphone muted", then "Microphone on" is spoken; the menu item Audio → Mute microphone is checked or not. |
+| 40 | Press Ctrl+Shift+M twice. | "Sound muted", then "Sound on". While muted you hear nobody and no event sounds. |
+| 41 | Press Ctrl+T, speak, press Ctrl+T. | "Talking on", then "Talking off". |
+| 42 | Select the other person (channel tree or Users list) and press Ctrl+Shift+V. | "Volume for name" dialog; the spin box reads "Volume for name, in percent". Up arrow changes their volume at once. "Silence" and "Normal (100%)" work. |
+| 43 | F4 → Sounds. Press "Play a test sound". Change the volume and try again. | A short sound plays at the new volume. |
+
 ## Scaling and contrast (A-11)
 
 | # | Do | Expect |
 |---|---|---|
-| 31 | Set Windows scaling to 200% and restart OpenTalk. | All text is visible, nothing overlaps, and the window is usable. |
-| 32 | Turn on a Windows contrast theme. | The application follows the theme and all text is readable. |
+| 44 | Set Windows scaling to 200% and restart OpenTalk. | All text is visible, nothing overlaps, and the window is usable. |
+| 45 | Turn on a Windows contrast theme. | The application follows the theme and all text is readable. |

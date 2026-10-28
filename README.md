@@ -4,7 +4,7 @@
 
 OpenTalk lets communities run their own voice and text chat servers, with channels, push-to-talk, moderation tools and plugins, and no central company in the middle. It is inspired by the functionality of TeamTalk 5 but is an independent project with its own protocol, SDK and code, written in C++ with Qt.
 
-> **Status: early development (version 0.1.0).** Text chat works: host a server from the app or run `opentalk-server`, then log in, use channels, and send channel, private and server-wide messages, all over TLS 1.3. **Voice is not implemented yet** (next phase). See [docs/status.md](docs/status.md) for exactly what works and what has been verified.
+> **Status: early development (version 0.1.0).** Text chat and voice work: host a server from the app or run `opentalk-server`, then log in, use channels, talk (push-to-talk, voice activation or always-on), and send channel, private and server-wide messages. Control traffic uses TLS 1.3 and voice is encrypted too. Voice is tested automatically with simulated sound devices but **has not yet been tried on real sound hardware**. See [docs/status.md](docs/status.md) for exactly what works and what has been verified.
 
 ## Principles
 

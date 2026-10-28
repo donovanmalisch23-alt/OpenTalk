@@ -11,6 +11,8 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include <algorithm>
+
 namespace opentalk::ui {
 
 using audio::EventSound;

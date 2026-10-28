@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QList>
 #include <QMap>
 #include <QtGlobal>
 
@@ -25,6 +26,10 @@ public:
     static constexpr int kMaxTarget = 10;
     static constexpr int kMaxStored = 64;
     static constexpr int kEndAfterMissing = 3;
+    /// How often (in played frames) the buffer checks whether it can be shorter.
+    static constexpr int kAdaptWindowFrames = 100;
+    /// Unrepaired losses (percent of a window) that make the buffer keep one extra frame.
+    static constexpr int kLossyPercent = 1;
 
     enum class Result {
         Empty,  ///< Nothing to play (not talking, or still buffering).
@@ -41,11 +46,15 @@ public:
     bool isPlaying() const { return m_playing; }
     int bufferedFrames() const { return static_cast<int>(m_packets.size()); }
     int targetFrames() const { return m_target; }
+    /// Packets that arrived after their moment had been concealed.
+    int latePackets() const { return m_lateCount; }
     double jitterMs() const { return m_jitterMs; }
     void reset();
 
 private:
     qint64 unwrap(quint16 sequence) const;
+    int targetForJitter() const;
+    void adaptDuringSpurt();
 
     QMap<qint64, QByteArray> m_packets; ///< Keyed by unwrapped sequence number.
     bool m_playing = false;
@@ -53,7 +62,19 @@ private:
     qint64 m_next = 0; ///< Next unwrapped sequence to play (valid while playing).
     qint64 m_lastInserted = 0;
     int m_missingInRow = 0;
-    int m_target = 3;
+    int m_target = kMinTarget;
+    int m_lateCount = 0;
+    bool m_growPending = false;
+    bool m_lateInWindow = false;
+    bool m_lateInSpurt = false;
+    /// Sequence numbers concealed recently (to recognise a packet that came too late).
+    QList<qint64> m_concealed;
+    /// Shrinking: the fewest packets left after a pop during the current window.
+    int m_windowPops = 0;
+    int m_windowMinBuffered = 0;
+    int m_windowUnrecovered = 0;
+    int m_windowLate = 0;
+    int m_lossFloor = kMinTarget; ///< Raised (once) after repeated unrepaired losses.
     double m_jitterMs = 0.0;
     qint64 m_lastArrivalMs = 0;
     qint64 m_lastArrivalSeq = 0;

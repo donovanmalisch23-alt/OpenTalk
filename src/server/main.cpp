@@ -179,6 +179,9 @@ int main(int argc, char *argv[])
                                        QStringLiteral("count"), QStringLiteral("200"));
     const QCommandLineOption guestsOption(QStringLiteral("allow-guests"),
                                           QStringLiteral("Let people join without an account, using a nickname."));
+    const QCommandLineOption noUdpOption(QStringLiteral("no-udp"),
+                                         QStringLiteral("Carry voice only over the encrypted TCP connections (for "
+                                                        "networks where the UDP port cannot be opened)."));
     const QCommandLineOption logOption(QStringLiteral("log-level"),
                                        QStringLiteral("warning, info or debug (default: info)."),
                                        QStringLiteral("level"), QStringLiteral("info"));
@@ -199,7 +202,8 @@ int main(int argc, char *argv[])
                                          QStringLiteral("Shut down gracefully when standard input closes. Used when "
                                                         "the OpenTalk app runs the server for you."));
     parser.addOptions({dataOption, listenOption, portOption, certOption, keyOption, nameOption, maxOption, guestsOption,
-                       logOption, createOption, roleOption, setPasswordOption, deleteOption, listOption, stdinOption});
+                       noUdpOption, logOption, createOption, roleOption, setPasswordOption, deleteOption, listOption,
+                       stdinOption});
     parser.process(app);
 
     const std::optional<logging::Level> level = logging::levelFromString(parser.value(logOption));
@@ -255,6 +259,7 @@ int main(int argc, char *argv[])
     config.session.serverName = name;
     config.session.serverVersion = QCoreApplication::applicationVersion();
     config.allowGuests = parser.isSet(guestsOption);
+    config.enableUdp = !parser.isSet(noUdpOption);
     config.database = &database;
 
     QString certPath = parser.value(certOption);
@@ -293,6 +298,13 @@ int main(int argc, char *argv[])
         return fail(error);
     }
     printLine(QStringLiteral("OpenTalk server \"%1\" is running on port %2.").arg(name).arg(server.serverPort()));
+    if (server.udpPort() != 0) {
+        printLine(QStringLiteral("Voice uses UDP port %1 (allow it through firewalls too; without it voice still "
+                                 "works, with more delay).")
+                      .arg(server.udpPort()));
+    } else {
+        printLine(QStringLiteral("Voice uses the TCP connections only (no UDP port)."));
+    }
     printLine(QStringLiteral("Data folder: %1").arg(QDir::toNativeSeparators(dataDir)));
     if (database.accounts().isEmpty()) {
         printLine(QStringLiteral("There are no accounts yet. Create an administrator with:"));
