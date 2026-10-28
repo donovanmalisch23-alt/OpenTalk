@@ -611,8 +611,11 @@ public:
                       [](const auto &a, const auto &b) { return a.name.compare(b.name, Qt::CaseInsensitive) < 0; });
             for (const protocol::AccountInfo &a : accounts) {
                 m_accounts.insert(a.name, a);
-                addRow(m_list, {a.name, state().roleName(a.roleId), a.disabled ? tr("disabled") : tr("active")},
-                       a.name);
+                QString status = a.disabled ? tr("disabled") : tr("active");
+                if (a.bot) {
+                    status += tr(", bot");
+                }
+                addRow(m_list, {a.name, state().roleName(a.roleId), status}, a.name);
             }
             if (accounts.isEmpty()) {
                 addEmptyRow(m_list, tr("No accounts"));
@@ -1358,12 +1361,15 @@ AccountDialog::AccountDialog(const QList<QPair<quint32, QString>> &roles, QWidge
     }
     const int user = m_role->findData(static_cast<quint32>(moderation::roles::kUser));
     m_role->setCurrentIndex(user >= 0 ? user : 0);
+    m_bot = new QCheckBox(tr("This account is for a &bot (a program)"));
+    m_bot->setAccessibleDescription(tr("Everyone sees it marked as a bot. Give it only the role it needs."));
     auto *form = new QFormLayout;
     form->addRow(buddyLabel(tr("&Name:"), m_name), m_name);
     form->addRow(QString(), helpLabel(tr("Letters, digits, dots, dashes and underscores; up to 32."), m_name));
     form->addRow(buddyLabel(tr("&Password:"), m_password), m_password);
     form->addRow(buddyLabel(tr("Password &again:"), m_confirm), m_confirm);
     form->addRow(buddyLabel(tr("&Role:"), m_role), m_role);
+    form->addRow(QString(), m_bot);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
     buttons->addButton(tr("&Create"), QDialogButtonBox::AcceptRole)->setDefault(true);
     connect(buttons, &QDialogButtonBox::accepted, this, &AccountDialog::accept);
@@ -1376,7 +1382,8 @@ AccountDialog::AccountDialog(const QList<QPair<quint32, QString>> &roles, QWidge
 
 protocol::CreateAccount AccountDialog::request() const
 {
-    return protocol::CreateAccount{0, m_name->text().trimmed(), m_password->text(), m_role->currentData().toUInt()};
+    return protocol::CreateAccount{0, m_name->text().trimmed(), m_password->text(), m_role->currentData().toUInt(),
+                                   m_bot->isChecked()};
 }
 
 void AccountDialog::accept()

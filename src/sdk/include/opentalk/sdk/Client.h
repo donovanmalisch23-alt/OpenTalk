@@ -64,6 +64,56 @@ struct User {
     QString name;
     Role role = Role::Guest;
     quint32 channelId = 0;
+    QString roleName; ///< The role's name on this server, for example "Moderator".
+    bool bot = false; ///< The account is a bot (since SDK 0.3).
+    bool voiceMuted = false;
+    bool textMuted = false;
+};
+
+/// Kinds of audio a client can send (since SDK 0.3).
+enum class AudioStream {
+    Voice,       ///< Speech: what push-to-talk sends.
+    Media,       ///< Music or other media played into the channel.
+    SystemAudio, ///< Sound the computer is playing.
+};
+
+/// Turns 48 kHz mono audio into the Opus packets that sendAudio() takes, 20 ms at a
+/// time (since SDK 0.3).
+class AudioEncoder {
+public:
+    static constexpr int kSampleRate = 48000;
+    static constexpr int kFrameSamples = 960; ///< 20 ms
+
+    enum class Content { Voice, Music };
+    explicit AudioEncoder(Content content = Content::Voice, int bitrate = 32000);
+    ~AudioEncoder();
+    AudioEncoder(const AudioEncoder &) = delete;
+    AudioEncoder &operator=(const AudioEncoder &) = delete;
+
+    bool isValid() const;
+    /// Encodes exactly kFrameSamples samples between -1 and 1. Empty on failure.
+    QByteArray encode(const QList<float> &frame);
+
+private:
+    class Private;
+    std::unique_ptr<Private> d;
+};
+
+/// Turns received Opus packets back into 48 kHz mono samples. Use one per speaker.
+class AudioDecoder {
+public:
+    AudioDecoder();
+    ~AudioDecoder();
+    AudioDecoder(const AudioDecoder &) = delete;
+    AudioDecoder &operator=(const AudioDecoder &) = delete;
+
+    bool isValid() const;
+    /// kFrameSamples samples, or silence for a damaged packet.
+    QList<float> decode(const QByteArray &packet);
+
+private:
+    class Private;
+    std::unique_ptr<Private> d;
 };
 
 struct TextMessage {
@@ -99,8 +149,7 @@ struct DisconnectReason {
 /// thread that created the object. Call Client::initialize() once before the first
 /// connection.
 ///
-/// Draft API (SDK 0.x): connection and login, channels, users and text. Audio is added
-/// when the server supports it.
+/// Draft API (SDK 0.x): connection and login, channels, users, text and audio.
 class Client : public QObject {
     Q_OBJECT
 
@@ -130,6 +179,15 @@ public:
     quint64 joinChannel(quint32 channelId, const QString &password = {});
     quint64 sendChannelMessage(const QString &text);
     quint64 sendDirectMessage(quint32 userId, const QString &text);
+    /// A message to everyone on the server; needs the broadcast.send permission.
+    quint64 sendServerMessage(const QString &text);
+
+    /// True once audio can be sent (after each login; see audioReady()).
+    bool isAudioReady() const;
+    /// Sends one Opus packet (20 ms; see AudioEncoder) to the people in your channel.
+    /// Send one every 20 ms while talking. Returns false if audio is not ready, the
+    /// packet is empty or too large. The server may refuse audio you may not send.
+    bool sendAudio(const QByteArray &opusPacket, AudioStream stream = AudioStream::Voice);
 
     /// Measures the round-trip time; the answer arrives as pingReplied().
     bool ping();
@@ -147,6 +205,12 @@ signals:
     void userLeft(const opentalk::sdk::User &user);
     void userMoved(const opentalk::sdk::User &user);
     void textReceived(const opentalk::sdk::TextMessage &message);
+    /// A user's role, mute or bot status changed.
+    void userUpdated(const opentalk::sdk::User &user);
+    /// Audio can be sent (after each login).
+    void audioReady();
+    /// One Opus packet from someone in your channel (decode with AudioDecoder).
+    void audioReceived(quint32 userId, opentalk::sdk::AudioStream stream, const QByteArray &opusPacket);
 
 private:
     class Private;

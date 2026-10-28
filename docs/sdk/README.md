@@ -1,6 +1,6 @@
 # OpenTalk SDK
 
-**Status: draft (SDK 0.2).** It is implemented and covered by tests through the `opentalk-ping` example. It can log in (account or guest), list channels and users, join channels, send and receive channel and private messages, reconnect automatically, and measure round-trip time. Audio is added in Phase 4.
+**Status: draft (SDK 0.3).** It is implemented and covered by tests through two examples run against a real server: `opentalk-ping` (`tst_server_process`) and `opentalk-greeter-bot` (`tst_examples`). It can log in (account or guest), list channels and users (with their role, mutes and whether they are bots), join channels, send and receive channel, private and server-wide messages, send and receive audio, reconnect automatically, and measure round-trip time.
 
 The SDK is the supported way for bots, tools and other programs to talk to OpenTalk servers. The OpenTalk desktop application is built on the same internal libraries.
 
@@ -33,11 +33,33 @@ login.password = readPasswordFromSomewhereSafe();
 client.connectToServer({"chat.example.org", 10350}, {"SHA256:AB:CD:..."}, login);
 ```
 
-A complete program is in [`examples/opentalk-ping`](../../examples/opentalk-ping/main.cpp).
+Complete programs: [`examples/opentalk-ping`](../../examples/opentalk-ping/main.cpp) (checks a server) and [`examples/greeter-bot`](../../examples/greeter-bot/main.cpp) (a bot that greets people, answers `!help`, `!time`, `!roll`, `!who` and `!beep`, and plays a tone).
 
-## Bots and permissions
+## Audio (since 0.3)
 
-A bot is an ordinary account (or guest) and gets exactly the permissions of its role; being a program gives it nothing extra. Create a dedicated account for each bot.
+Audio travels as Opus packets of 20 ms. `AudioEncoder` turns 960 samples of 48 kHz mono audio (floats from -1 to 1) into a packet; `AudioDecoder` does the reverse, one decoder per speaker.
+
+```cpp
+opentalk::sdk::AudioEncoder encoder(opentalk::sdk::AudioEncoder::Content::Music, 64000);
+QTimer timer;
+timer.setInterval(20);
+QObject::connect(&timer, &QTimer::timeout, [&] {
+    QList<float> frame = nextTwentyMilliseconds(); // 960 samples
+    client.sendAudio(encoder.encode(frame), opentalk::sdk::AudioStream::Media);
+});
+QObject::connect(&client, &opentalk::sdk::Client::audioReady, [&] { timer.start(); });
+```
+
+`sendAudio()` works once `audioReady()` has been emitted (after each login). Received audio arrives through `audioReceived(userId, stream, packet)`. The server forwards audio only to the sender's channel, and only if the sender's role may transmit there.
+
+## Bots
+
+A bot is an ordinary account and gets exactly the permissions of its role; being a program gives it nothing extra.
+
+- Create a dedicated account for each bot, marked as a bot: `opentalk-server --create-account greeter --bot` (or tick "This account is for a bot" in Moderation, Administration, Accounts). Everyone sees "bot" next to its name, and the audit log marks what it does.
+- Give it the smallest role that works. A moderation bot needs a moderator role; a greeter needs nothing special.
+- `User::bot` tells your bot which users are bots. **Never answer other bots automatically**, or two bots can keep each other talking.
+- Keep the password out of the command line (other users of the computer can see command lines). The example reads it from standard input.
 
 ## Server identity
 
@@ -53,4 +75,4 @@ Pass the server's certificate fingerprint as `ServerIdentity::pinnedFingerprint`
 
 ## Licensing
 
-The SDK is GPL-3.0-only, like the rest of OpenTalk. Programs that link it must be distributable under GPL-3.0-compatible terms. A policy for plugins and external tools is planned for Phase 6, with legal review.
+The SDK is GPL-3.0-only, like the rest of OpenTalk. Programs that link it must be distributable under GPL-3.0-compatible terms. See the [licensing policy for plugins, bots and other programs](../plugins/licensing.md) (a draft awaiting legal review).

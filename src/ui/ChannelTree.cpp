@@ -52,6 +52,9 @@ QString ChannelTree::userLabel(const QString &name, bool isSelf, const QString &
     if (isSelf) {
         label += tr(" (you)");
     }
+    if ((flags & protocol::BotFlag) != 0) {
+        label += tr(", bot");
+    }
     if (!role.isEmpty()) {
         label += tr(", %1").arg(role);
     }

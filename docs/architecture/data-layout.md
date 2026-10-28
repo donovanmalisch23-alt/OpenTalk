@@ -23,6 +23,11 @@ Nothing is written to the registry, and no administrator rights are needed.
 │   └── server-profiles.json                   Saved servers (no passwords)
 ├── logs/
 │   └── opentalk-client.log
+├── logs/plugins/<id>.log                    Each plugin's log (standard error and "log" messages)
+├── plugins/<id>/                              Installed plugins (copied from the folder the user chose)
+├── plugin-data/<id>/                          Each plugin's own writable folder
+├── config/plugins.json                        Which plugins are on, what they may do, and the manifest
+│                                              hash the user agreed to
 └── servers/
     └── local/                                 The server you host from the app (same layout as below)
 ```
@@ -33,7 +38,8 @@ Nothing is written to the registry, and no administrator rights are needed.
 
 ```
 <folder>/
-├── opentalk.db          SQLite: accounts (username, role, Argon2id hash) and persistent channels
+├── opentalk.db          SQLite (schema 3): accounts (role, Argon2id hash, bot), persistent channels, roles,
+│                        permission rules, sanctions, reports, appeals, audit log, settings
 ├── opentalk.db-wal/-shm SQLite working files (write-ahead log)
 ├── opentalk.db.v<N>-backup  Copy made before a database upgrade
 └── tls/
@@ -47,8 +53,6 @@ Nothing is written to the registry, and no administrator rights are needed.
 |---|---|---|
 | Windows Credential Manager entries | Optional remembered passwords (today the app asks each time). | later |
 | `soundpacks/<name>/` | User soundpacks with a `soundpack.json` manifest. | 3/4 |
-| `plugins/<id>/` and `config/plugins/<id>.json` | Installed plugins and their settings. | 6 |
-| Server `opentalk.db` additions | Roles and capabilities, sanctions, audit log. | 5 |
 | Server `backups/` | Database backups. | 8 |
 | `cache/` | Disposable data; safe to delete. | as needed |
 

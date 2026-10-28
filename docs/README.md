@@ -34,10 +34,12 @@ Every document marks features with one of these states, so nothing planned is mi
 
 - [Voice and sounds (user guide)](user-guide/voice-and-sounds.md)
 - [Reports, sanctions and appeals (user guide)](user-guide/moderation.md)
+- [Plugins (user guide)](user-guide/plugins.md)
 - [Server quick start](server-administration/quick-start.md)
 - [Moderating and administering a server](server-administration/moderation.md)
 - [Audio benchmarks](audio/benchmarks.md)
-- [SDK guide](sdk/README.md)
+- [SDK guide](sdk/README.md) (bots and tools)
+- [Writing a plugin](plugins/developer-guide.md), the [plugin message reference](plugins/ipc.md) and the [licensing policy for plugins and bots](plugins/licensing.md)
 
 ## Development
 

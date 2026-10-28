@@ -1,0 +1,16 @@
+{
+    "id": "org.opentalk.examples.dice",
+    "name": "Dice roller",
+    "version": "1.0.0",
+    "description": "Adds \"Roll a dice\" to the Plugins menu, which rolls a six-sided dice and tells your channel the result. People in your channel can also type !dice or !dice 20.",
+    "author": "The OpenTalk contributors",
+    "license": "GPL-3.0-only",
+    "homepage": "https://github.com/donovanmalisch23-alt/OpenTalk",
+    "apiVersion": 1,
+    "executable": {
+        "windows": "opentalk-dice-plugin.exe",
+        "linux": "opentalk-dice-plugin",
+        "macos": "opentalk-dice-plugin"
+    },
+    "capabilities": ["messages.read", "messages.send", "notifications.show", "commands.add"]
+}

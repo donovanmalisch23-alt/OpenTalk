@@ -10,7 +10,7 @@ These messages extend [protocol version 1](proposal.md). They use the same frami
 |---|---|
 | AuthResult (0x0008) | 3: role is now any role ID (see below). 4: capabilities held server-wide (array of capability numbers). 5: capabilities held only in some channels, for example by a channel moderator (array, optional). |
 | StateSnapshot (0x0100) | 3: roles (array of roles, optional). |
-| User fields | 3: role ID. 5: flags (optional; bit 0 voice muted, bit 1 text muted, bit 2 restricted). |
+| User fields | 3: role ID. 5: flags (optional; bit 0 voice muted, bit 1 text muted, bit 2 restricted, bit 3 bot (Phase 6)). |
 | ChannelUpdated (0x0103) | S→C. A channel (same fields as ChannelAdded) after someone edited it. |
 | EditChannel (0x0113) | C→S. 1: request ID, 2: channel ID, 3: name, 4: topic, 5: maximum users, 6: change password (bool), 7: new password (omit to remove it). Needs `channel.edit` there. |
 | UserUpdated (0x0203) | S→C. 1: user ID, 2: role ID, 3: flags. Sent to everyone when someone's role or mute changes. |
@@ -46,7 +46,7 @@ Every request has 1: request ID. Each is answered by `RequestDone`, by `Error` w
 | 0x0519 | DecideAppeal | 2: appeal ID, 3: decision (1 upheld, 2 reduced, 3 overturned), 4: reason, 5: new duration in seconds (reduced only, counted from when the sanction was given) | `appeal.decide`; not the moderator who gave the sanction, while someone else can decide | RequestDone |
 | 0x051A | ReadAudit | 2: entries before this number (0 = newest), 3: how many (1–500) | `audit.read` | AuditPage |
 | 0x051B | AuditPage | 2: entries, newest first, 3: chain intact (bool), 4: first damaged entry | | |
-| 0x0520 | CreateAccount | 2: name, 3: password (at least 8 characters by default), 4: role ID | `account.manage`; the role must rank below yours and cannot be Guest or Owner | RequestDone |
+| 0x0520 | CreateAccount | 2: name, 3: password (at least 8 characters by default), 4: role ID, 5: bot (bool, optional, Phase 6) | `account.manage`; the role must rank below yours and cannot be Guest or Owner | RequestDone |
 | 0x0521 | DeleteAccount | 2: name | `account.manage`, and a higher rank than the account (so never the owner, nor yourself). Someone online with that account is disconnected. | RequestDone |
 | 0x0522 | SetAccountPassword | 2: name, 3: new password | your own account; or `account.manage` and a higher rank | RequestDone |
 | 0x0523 | SaveRole | 2: a role (ID 0 creates one) | `role.manage`; only roles below your rank, with rank 2–89, and only capabilities you hold yourself | RequestDone (result ID: the role's ID) |
@@ -70,7 +70,7 @@ Every request has 1: request ID. Each is answered by `RequestDone`, by `Error` w
 | Sanction | 1: ID, 2: type, 3: channel ID (0 = whole server), 4: target's name, 5: target's account (omitted for guests), 6: target's address (only for holders of `user.ban.address`), 7: given by, 8: reason, 9: given at, 10: ends at (0 = until lifted), 11: state (0 active, 1 ended, 2 lifted, 3 overturned), 12: resolved by, 13: resolution |
 | Report | 1: ID, 2: reported by, 3: about, 4: their account, 5: reason, 6: time, 7: state (0 open, 1 action taken, 2 dismissed), 8: handled by, 9: note |
 | Appeal | 1: ID, 2: sanction ID, 3: from, 4: text, 5: time, 6: state (0 open, 1 upheld, 2 reduced, 3 overturned), 7: decided by, 8: reason |
-| Account | 1: name, 2: role ID, 3: disabled (bool) |
+| Account | 1: name, 2: role ID, 3: disabled (bool), 4: bot (bool, Phase 6) |
 | Rule | 1: ID, 2: channel ID (0 = whole server), 3: for an account (bool), 4: account name, 5: role ID, 6: capability, 7: allow (bool) |
 | Audit entry | 1: number, 2: time, 3: who, 4: action (for example `sanction.ban`), 5: target, 6: channel ID, 7: reason, 8: details, 9: SHA-256 hash |
 | Settings | 1: server name, 2: welcome message, 3: guests allowed, 4: most people online, 5: highest voice bit rate (6,000–510,000), 6: longest temporary ban in days, 7: contact for banned people |

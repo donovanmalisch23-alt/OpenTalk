@@ -6,6 +6,11 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ### Added
 
+- Plugins (Phase 6): separate programs in any language that talk JSON lines with the app. A consent dialog lists what each may do; permissions are enforced, must be reviewed again when a plugin changes, and misbehaving or crash-looping plugins are turned off. Plugin manager, Plugins menu (Alt+P) and `--no-plugins`.
+- Example plugins: a dice roller in C++ and a "who is here" plugin in Python, included in the portable zip under `examples\plugins`.
+- Bot accounts: `opentalk-server --create-account <name> --bot`, or a check box in Administration. Everyone sees them marked as bots, and the audit log names them as bots. Server database schema 3 (upgraded automatically).
+- SDK 0.3: users' role names, mutes and bot status; server-wide messages; sending and receiving audio with `AudioEncoder` and `AudioDecoder`. Example `opentalk-greeter-bot`, included in the portable zip.
+- Round-trip tests for every moderation and administration message.
 - Moderation and administration (Phase 5): roles with ranks (owner, administrator, moderator, registered user, guest, restricted, and custom roles), capabilities, and per-channel permission rules for roles or single accounts.
 - Sanctions: warnings, voice and text mutes, kicks, bans (optionally by IP address), restrictions and moves, server-wide or in one channel, with required reasons, automatic expiry, and a clear message to the person sanctioned.
 - Reports, appeals (decided by someone other than the issuing moderator), and a hash-chained audit log with `--verify-audit`, `--export-audit` and `--audit-retention-days`.

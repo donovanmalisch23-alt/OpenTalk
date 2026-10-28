@@ -21,6 +21,7 @@ struct Account {
     protocol::Role role = protocol::Role::User;
     QByteArray passwordHash;
     bool disabled = false;
+    bool bot = false; ///< A program rather than a person; shown as such to everyone.
 };
 
 /// A channel that survives server restarts.
@@ -47,7 +48,7 @@ public:
     ServerDatabase(const ServerDatabase &) = delete;
     ServerDatabase &operator=(const ServerDatabase &) = delete;
 
-    static constexpr int kSchemaVersion = 2;
+    static constexpr int kSchemaVersion = 3;
 
     bool open(const QString &path, QString *errorMessage = nullptr);
     void close();
@@ -63,6 +64,8 @@ public:
                        QString *errorMessage = nullptr);
     bool setPasswordHash(const QString &username, const QByteArray &passwordHash);
     bool setRole(const QString &username, protocol::Role role);
+    /// Marks an account as a bot (or not).
+    bool setBot(const QString &username, bool bot);
     bool deleteAccount(const QString &username);
     int adminCount() const;
     std::optional<Account> findAccountById(qint64 id) const;

@@ -2,6 +2,8 @@
 #include "opentalk/ui/MainWindow.h"
 
 #include "opentalk/logging/Logging.h"
+#include "opentalk/plugins/PluginHost.h"
+#include "opentalk/plugins/PluginRegistry.h"
 #include "opentalk/storage/AppPaths.h"
 #include "opentalk/storage/ClientSettings.h"
 #include "opentalk/storage/SettingsStore.h"
@@ -12,6 +14,7 @@
 #include "opentalk/ui/ChannelTree.h"
 #include "opentalk/ui/ConnectDialog.h"
 #include "opentalk/ui/ModerationDialogs.h"
+#include "opentalk/ui/PluginDialogs.h"
 #include "opentalk/ui/SettingsDialog.h"
 
 #include <QAccessible>
@@ -221,6 +224,7 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
             [this] { appendHistory(tr("Your server has stopped.")); });
 
     buildAudio(std::move(audioBackend));
+    buildPlugins();
 
     m_channelTree->showMessage(tr("Not connected to a server"));
     setStatusText(tr("Not connected"));
@@ -240,6 +244,68 @@ MainWindow::~MainWindow()
     if (m_audio != nullptr) {
         QObject::disconnect(m_audio, nullptr, this, nullptr);
     }
+    if (m_pluginHost != nullptr) {
+        QObject::disconnect(m_pluginHost, nullptr, this, nullptr);
+        delete m_pluginHost; // before the connection it uses
+        m_pluginHost = nullptr;
+    }
+}
+
+void MainWindow::buildPlugins()
+{
+    m_pluginRegistry = std::make_unique<plugins::PluginRegistry>(m_paths.dataRoot() + QStringLiteral("/plugins"),
+                                                                 m_paths.configDir() + QStringLiteral("/plugins.json"));
+    m_pluginRegistry->load();
+    m_pluginHost = new plugins::PluginHost(
+        *m_pluginRegistry, m_connection, m_paths.logDir() + QStringLiteral("/plugins"), plugins::PluginHost::Limits{});
+    connect(m_pluginHost, &plugins::PluginHost::commandsChanged, this, &MainWindow::rebuildPluginsMenu);
+    connect(m_pluginHost, &plugins::PluginHost::notification, this,
+            [this](const QString &plugin, const QString &text, bool speak) {
+                appendHistory(tr("%1: %2").arg(plugin, text));
+                if (speak) {
+                    announce(static_cast<int>(Category::Message), text);
+                }
+            });
+    connect(m_pluginHost, &plugins::PluginHost::problem, this, [this](const QString &, const QString &text) {
+        appendHistory(text);
+        setStatusText(text);
+    });
+    rebuildPluginsMenu();
+}
+
+void MainWindow::startPlugins()
+{
+    m_pluginHost->startEnabled();
+}
+
+void MainWindow::rebuildPluginsMenu()
+{
+    if (m_pluginsMenu == nullptr) {
+        return;
+    }
+    m_pluginsMenu->clear();
+    QAction *manage = m_pluginsMenu->addAction(tr("&Manage plugins..."), this, &MainWindow::openPluginManager);
+    manage->setObjectName(QStringLiteral("managePluginsAction"));
+    const QList<plugins::PluginCommand> commands = m_pluginHost->commands();
+    if (!commands.isEmpty()) {
+        m_pluginsMenu->addSeparator();
+    }
+    for (const plugins::PluginCommand &command : commands) {
+        // "&" in a plugin's title must not become a mnemonic.
+        QString title = command.title;
+        title.replace(QLatin1Char('&'), QStringLiteral("&&"));
+        QString plugin = command.pluginName;
+        plugin.replace(QLatin1Char('&'), QStringLiteral("&&"));
+        m_pluginsMenu->addAction(tr("%1 (%2)").arg(title, plugin), this,
+                                 [this, command] { m_pluginHost->runCommand(command.pluginId, command.id); });
+    }
+}
+
+void MainWindow::openPluginManager()
+{
+    PluginManagerDialog dialog(*m_pluginRegistry, *m_pluginHost, this);
+    connect(&dialog, &PluginManagerDialog::statusChanged, this, &MainWindow::setStatusText);
+    dialog.exec();
 }
 
 void MainWindow::buildAudio(std::unique_ptr<audio::AudioBackend> backend)
@@ -529,6 +595,8 @@ void MainWindow::buildMenus()
     m_deafenAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M));
     audioMenu->addSeparator();
     audioMenu->addAction(tr("Audio &settings..."), this, &MainWindow::openAudioSettings);
+
+    m_pluginsMenu = menuBar()->addMenu(tr("&Plugins"));
 
     QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
     const QList<std::pair<QString, Pane>> panes = {
@@ -1458,6 +1526,7 @@ void MainWindow::saveLayout()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    m_pluginHost->stopAll();
     m_connection.disconnectFromServer();
     m_audio->engine().stop();
     m_localServer.stop(); // finishes in the background; the destructor waits briefly

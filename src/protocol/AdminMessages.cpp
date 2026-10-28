@@ -167,7 +167,7 @@ AuditEntryInfo readAudit(FieldReader &r, const QCborMap &)
 
 QCborMap accountToCbor(const AccountInfo &x)
 {
-    return {{1, x.name}, {2, static_cast<qint64>(x.roleId)}, {3, x.disabled}};
+    return {{1, x.name}, {2, static_cast<qint64>(x.roleId)}, {3, x.disabled}, {4, x.bot}};
 }
 
 AccountInfo readAccount(FieldReader &r, const QCborMap &)
@@ -176,6 +176,7 @@ AccountInfo readAccount(FieldReader &r, const QCborMap &)
     x.name = r.name(1, "account.name", kMaxDisplayNameLength);
     x.roleId = r.integer<quint32>(2, "account.role");
     x.disabled = r.boolean(3, "account.disabled", false);
+    x.bot = r.boolean(4, "account.bot", false);
     return x;
 }
 
@@ -479,7 +480,7 @@ Message decodeAdmin(MessageType type, FieldReader &r)
     }
     case MessageType::CreateAccount:
         return CreateAccount{requestId(), r.name(2, "name", kMaxDisplayNameLength), r.secret(3, "password", true),
-                             r.integer<quint32>(4, "roleId")};
+                             r.integer<quint32>(4, "roleId"), r.boolean(5, "bot", false)};
     case MessageType::DeleteAccount:
         return DeleteAccount{requestId(), r.name(2, "name", kMaxDisplayNameLength)};
     case MessageType::SetAccountPassword:
@@ -717,7 +718,8 @@ QCborMap toCbor(const AuditPage &m)
 
 QCborMap toCbor(const CreateAccount &m)
 {
-    return {{kRequestId, u64(m.requestId)}, {2, m.name}, {3, m.password}, {4, static_cast<qint64>(m.roleId)}};
+    return {
+        {kRequestId, u64(m.requestId)}, {2, m.name}, {3, m.password}, {4, static_cast<qint64>(m.roleId)}, {5, m.bot}};
 }
 
 QCborMap toCbor(const DeleteAccount &m)

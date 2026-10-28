@@ -104,6 +104,7 @@ private:
         ClientState state = ClientState::AwaitingAuth;
         protocol::UserInfo user;              ///< user.role is the account's role
         qint64 accountId = 0;                 ///< 0 for guests
+        bool bot = false;                     ///< A bot account
         moderation::RoleId effectiveRole = 0; ///< Restricted while under a restriction
         QList<quint16> capabilities;          ///< Last sent to the client
         QList<quint16> channelCapabilities;   ///< Last sent to the client
@@ -121,7 +122,7 @@ private:
     // ServerCore.cpp: sessions, login, channels, text, voice
     void authenticate(Client &client, const protocol::Authenticate &request);
     void loginFailed(quint32 sessionId, const QHostAddress &address, const QString &detail);
-    void goOnline(Client &client, const QString &name, protocol::Role role, qint64 accountId);
+    void goOnline(Client &client, const QString &name, protocol::Role role, qint64 accountId, bool bot = false);
     void joinChannel(Client &client, const protocol::JoinChannel &request);
     void createChannel(Client &client, const protocol::CreateChannel &request);
     void finishCreateChannel(quint32 clientId, const protocol::CreateChannel &request, const QByteArray &passwordHash);

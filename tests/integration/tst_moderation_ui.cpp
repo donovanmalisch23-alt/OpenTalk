@@ -5,6 +5,7 @@
 // Modal dialogs are answered by a timer that finds them, as a person would.
 
 #include "../unit/AudioTestUtil.h"
+#include "UiTestUtil.h"
 
 #include "opentalk/client/Connection.h"
 #include "opentalk/moderation/Appeals.h"
@@ -41,6 +42,7 @@
 using namespace opentalk;
 using protocol::Role;
 using Page = ui::AdminDialog::Page;
+using namespace opentalk::test;
 
 namespace {
 
@@ -56,25 +58,6 @@ QStringList treeTexts(QTreeWidget *tree)
     return texts;
 }
 
-QStringList unnamedFocusableWidgets(QWidget *root)
-{
-    QStringList problems;
-    for (QWidget *widget : root->findChildren<QWidget *>()) {
-        if (widget->focusPolicy() == Qt::NoFocus || !widget->isVisibleTo(root)) {
-            continue;
-        }
-        if (qobject_cast<QAbstractSpinBox *>(widget->parentWidget()) != nullptr) {
-            continue; // a spin box's editor; the spin box itself is checked
-        }
-        QAccessibleInterface *iface = QAccessible::queryAccessibleInterface(widget);
-        if (iface == nullptr || iface->text(QAccessible::Name).trimmed().isEmpty()) {
-            problems << QString::fromLatin1(widget->metaObject()->className()) + QLatin1Char(' ') +
-                            widget->objectName();
-        }
-    }
-    return problems;
-}
-
 QStringList listTexts(QTreeWidget *list)
 {
     QStringList texts;
@@ -82,45 +65,6 @@ QStringList listTexts(QTreeWidget *list)
         texts << list->topLevelItem(i)->data(0, Qt::AccessibleTextRole).toString();
     }
     return texts;
-}
-
-template <typename T> T *named(QWidget *root, const QString &accessibleName)
-{
-    for (T *widget : root->findChildren<T *>()) {
-        if (widget->accessibleName() == accessibleName) {
-            return widget;
-        }
-    }
-    return nullptr;
-}
-
-QPushButton *buttonWithText(QWidget *root, const QString &text)
-{
-    for (QPushButton *b : root->findChildren<QPushButton *>()) {
-        if (b->text() == text) {
-            return b;
-        }
-    }
-    return nullptr;
-}
-
-/// Calls `answer` with the next modal dialog of type T that opens (at most one).
-template <typename T> void whenDialogOpens(std::function<void(T *)> answer)
-{
-    auto *timer = new QTimer;
-    timer->setInterval(20);
-    auto remaining = std::make_shared<int>(500);
-    QObject::connect(timer, &QTimer::timeout, [timer, answer, remaining] {
-        if (auto *dialog = qobject_cast<T *>(QApplication::activeModalWidget())) {
-            timer->stop();
-            timer->deleteLater();
-            answer(dialog);
-        } else if (--*remaining <= 0) {
-            timer->stop();
-            timer->deleteLater();
-        }
-    });
-    timer->start();
 }
 
 /// One person's desktop app, logged in to the test server.
@@ -541,6 +485,18 @@ private slots:
         QCOMPARE(listTexts(rules),
                  QStringList{QStringLiteral(
                      "the whole server, For: role Registered user, Permission: voice.transmit, Effect: deny")});
+    }
+
+    void userLabelsSayRolesMutesAndBots()
+    {
+        QCOMPARE(ui::ChannelTree::userLabel(QStringLiteral("dj"), false, QString(), protocol::BotFlag),
+                 QStringLiteral("dj, bot"));
+        QCOMPARE(ui::ChannelTree::userLabel(QStringLiteral("me"), true, QStringLiteral("moderator"),
+                                            protocol::VoiceMutedFlag | protocol::TextMutedFlag),
+                 QStringLiteral("me (you), moderator, muted"));
+        QCOMPARE(ui::ChannelTree::userLabel(QStringLiteral("x"), false, QString(),
+                                            protocol::TextMutedFlag | protocol::RestrictedFlag),
+                 QStringLiteral("x, text muted, restricted"));
     }
 
     void dialogsAreAccessible()

@@ -87,10 +87,11 @@ Account accountFrom(const QSqlQuery &q)
     a.role = static_cast<protocol::Role>(q.value(2).toInt());
     a.passwordHash = q.value(3).toByteArray();
     a.disabled = q.value(4).toBool();
+    a.bot = q.value(5).toBool();
     return a;
 }
 
-constexpr const char *kAccountColumns = "id, username, role, password_hash, disabled";
+constexpr const char *kAccountColumns = "id, username, role, password_hash, disabled, bot";
 
 } // namespace
 
@@ -263,11 +264,14 @@ bool ServerDatabase::migrate(int fromVersion, QString *errorMessage)
             moderation::AuditEntry entry;
             entry.timeMs = QDateTime::currentMSecsSinceEpoch();
             entry.action = QStringLiteral("server.database-upgraded");
-            entry.details = QStringLiteral("from=%1; to=2").arg(fromVersion) +
+            entry.details = QStringLiteral("from=%1; to=%2").arg(fromVersion).arg(kSchemaVersion) +
                             (promoted.isEmpty() ? QString() : QStringLiteral("; owner=%1").arg(promoted));
             entry = moderation::chainAuditEntry(entry, std::nullopt);
             ok = insertAuditRow(db, entry);
         }
+    }
+    if (ok && fromVersion < 3) {
+        ok = run("ALTER TABLE accounts ADD COLUMN bot INTEGER NOT NULL DEFAULT 0");
     }
     ok = ok && q.exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
     if (!ok) {
@@ -360,6 +364,15 @@ bool ServerDatabase::setRole(const QString &username, protocol::Role role)
     QSqlQuery q(QSqlDatabase::database(m_connectionName, false));
     q.prepare(QStringLiteral("UPDATE accounts SET role = ? WHERE username = ?"));
     q.addBindValue(static_cast<int>(role));
+    q.addBindValue(username);
+    return q.exec() && q.numRowsAffected() == 1;
+}
+
+bool ServerDatabase::setBot(const QString &username, bool bot)
+{
+    QSqlQuery q(QSqlDatabase::database(m_connectionName, false));
+    q.prepare(QStringLiteral("UPDATE accounts SET bot = ? WHERE username = ?"));
+    q.addBindValue(bot ? 1 : 0);
     q.addBindValue(username);
     return q.exec() && q.numRowsAffected() == 1;
 }

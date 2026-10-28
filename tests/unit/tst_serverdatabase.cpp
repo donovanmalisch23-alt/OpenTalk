@@ -50,6 +50,11 @@ private slots:
         QCOMPARE(db.findAccount(QStringLiteral("alice"))->passwordHash, QByteArray("hash3"));
         QVERIFY(db.setRole(QStringLiteral("alice"), protocol::Role::User));
         QCOMPARE(db.adminCount(), 0);
+        QVERIFY(!db.findAccount(QStringLiteral("alice"))->bot);
+        QVERIFY(db.setBot(QStringLiteral("alice"), true));
+        QVERIFY(db.findAccount(QStringLiteral("alice"))->bot);
+        QVERIFY(db.accounts().first().bot);
+        QVERIFY(!db.setBot(QStringLiteral("nobody"), true));
         QVERIFY(db.deleteAccount(QStringLiteral("alice")));
         QVERIFY(!db.findAccount(QStringLiteral("alice")));
         QVERIFY(!db.deleteAccount(QStringLiteral("alice")));
@@ -146,6 +151,7 @@ private slots:
         QCOMPARE(db.owner()->username, QStringLiteral("first"));
         QVERIFY(db.findAccount(QStringLiteral("second"))->role == protocol::Role::Admin);
         QVERIFY(db.findAccount(QStringLiteral("member"))->role == protocol::Role::User);
+        QVERIFY(!db.findAccount(QStringLiteral("member"))->bot); // schema 3 added the column
         QCOMPARE(db.roles().size(), moderation::builtInRoles().size());
         const auto audit = db.auditEntries(0, 10);
         QCOMPARE(audit.size(), 1);

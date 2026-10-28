@@ -87,6 +87,7 @@ struct AccountInfo {
     QString name;
     quint32 roleId = 0;
     bool disabled = false;
+    bool bot = false;
     friend bool operator==(const AccountInfo &, const AccountInfo &) = default;
 };
 
@@ -287,6 +288,7 @@ struct CreateAccount {
     QString name;
     QString password;
     quint32 roleId = 1;
+    bool bot = false; ///< The account is for a program (shown as "bot" to everyone).
     friend bool operator==(const CreateAccount &, const CreateAccount &) = default;
 };
 

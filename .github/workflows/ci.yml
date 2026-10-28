@@ -73,14 +73,16 @@ jobs:
           $stage = "OpenTalk-portable"
           New-Item -ItemType Directory -Force $stage | Out-Null
           # qt_standard_project_setup() may place executables at the build root on Windows.
-          foreach ($name in "OpenTalk.exe", "opentalk-server.exe", "opentalk-ping.exe", "opentalk-audio-bench.exe") {
+          foreach ($name in "OpenTalk.exe", "opentalk-server.exe", "opentalk-ping.exe", "opentalk-audio-bench.exe",
+                            "opentalk-greeter-bot.exe") {
             $exe = Get-ChildItem -Path build/windows-msvc-release -Recurse -Filter $name | Select-Object -First 1
             if (-not $exe) { throw "$name was not found in the build directory" }
             Write-Host "Packaging $($exe.FullName)"
             Copy-Item $exe.FullName $stage/
           }
           windeployqt --release --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw `
-            "$stage/OpenTalk.exe" "$stage/opentalk-server.exe" "$stage/opentalk-ping.exe" "$stage/opentalk-audio-bench.exe"
+            "$stage/OpenTalk.exe" "$stage/opentalk-server.exe" "$stage/opentalk-ping.exe" "$stage/opentalk-audio-bench.exe" `
+            "$stage/opentalk-greeter-bot.exe"
           # OpenSSL, libsodium and Opus from vcpkg (the same build the tests used).
           Copy-Item "$env:OPENSSL_BIN/*.dll" $stage/
           # windeployqt skips Qt's OpenSSL TLS plugin because OpenSSL is not part of Qt; copy it.
@@ -88,6 +90,12 @@ jobs:
           if (-not $plugin) { throw "qopensslbackend.dll not found in the Qt installation" }
           Copy-Item $plugin.FullName "$stage/tls/"
           if (-not (Test-Path "$stage/tls/qopensslbackend.dll")) { throw "Qt's OpenSSL TLS plugin was not deployed" }
+          # Example plugins, ready for Plugins > Manage plugins > Install from folder. Plugins
+          # run with OpenTalk's folder on their PATH, so the C++ example uses the Qt shipped here.
+          $dice = "build/windows-msvc-release/plugins/org.opentalk.examples.dice"
+          New-Item -ItemType Directory -Force "$stage/examples/plugins/dice" | Out-Null
+          Copy-Item "$dice/opentalk-dice-plugin.exe", "$dice/plugin.json" "$stage/examples/plugins/dice/"
+          Copy-Item -Recurse examples/plugins/hello-python "$stage/examples/plugins/hello-python"
           New-Item -ItemType File "$stage/OpenTalk.portable" | Out-Null
           Copy-Item LICENSE "$stage/LICENSE.txt"
           Copy-Item README.md "$stage/README.md"
@@ -117,6 +125,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "packaged opentalk-audio-bench failed (exit code $LASTEXITCODE)" }
           & "$stage/opentalk-audio-bench.exe" network
           if ($LASTEXITCODE -ne 0) { throw "packaged voice path failed (exit code $LASTEXITCODE)" }
+          # The example bot loads with the packaged libraries.
+          & "$stage/opentalk-greeter-bot.exe" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "packaged opentalk-greeter-bot failed to start (exit code $LASTEXITCODE)" }
+          # The example plugin starts and answers the handshake, with OpenTalk's folder on PATH
+          # as when the app runs it.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$((Resolve-Path $stage).Path)"
+          $reply = '{"type":"hello","apiVersion":1}', '{"type":"shutdown"}' | & "$stage/examples/plugins/dice/opentalk-dice-plugin.exe"
+          Write-Host $reply
+          if (-not ($reply -match '"type":"ready"')) { throw "packaged dice plugin did not answer the handshake" }
 
       - name: Upload portable build
         uses: actions/upload-artifact@v4

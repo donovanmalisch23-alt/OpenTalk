@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "opentalk/sdk/Client.h"
 
+#include "opentalk/audio/AudioFormat.h"
+#include "opentalk/audio/OpusCodec.h"
 #include "opentalk/client/Connection.h"
 #include "opentalk/security/Tls.h"
 
@@ -18,7 +20,65 @@ public:
     client::Connection connection;
     QString applicationName = QStringLiteral("OpenTalk SDK client");
     QString applicationVersion = QStringLiteral("unspecified");
+    quint16 sequence[3] = {0, 0, 0};
 };
+
+static_assert(AudioEncoder::kFrameSamples == audio::kFrameSamples && AudioEncoder::kSampleRate == audio::kSampleRate);
+
+class AudioEncoder::Private {
+public:
+    Private(Content content, int bitrate)
+        : encoder(content == Content::Voice ? audio::OpusEncoderWrapper::Content::Voice
+                                            : audio::OpusEncoderWrapper::Content::Music,
+                  bitrate)
+    {
+    }
+    audio::OpusEncoderWrapper encoder;
+};
+
+AudioEncoder::AudioEncoder(Content content, int bitrate)
+    : d(std::make_unique<Private>(content, bitrate))
+{
+}
+
+AudioEncoder::~AudioEncoder() = default;
+
+bool AudioEncoder::isValid() const
+{
+    return d->encoder.isValid();
+}
+
+QByteArray AudioEncoder::encode(const QList<float> &frame)
+{
+    if (frame.size() != kFrameSamples) {
+        return {};
+    }
+    return d->encoder.encode(std::span<const float>(frame.constData(), static_cast<std::size_t>(frame.size())));
+}
+
+class AudioDecoder::Private {
+public:
+    audio::OpusDecoderWrapper decoder;
+};
+
+AudioDecoder::AudioDecoder()
+    : d(std::make_unique<Private>())
+{
+}
+
+AudioDecoder::~AudioDecoder() = default;
+
+bool AudioDecoder::isValid() const
+{
+    return d->decoder.isValid();
+}
+
+QList<float> AudioDecoder::decode(const QByteArray &packet)
+{
+    QList<float> out(AudioEncoder::kFrameSamples, 0.0f);
+    d->decoder.decode(packet, std::span<float>(out.data(), static_cast<std::size_t>(out.size())));
+    return out;
+}
 
 namespace {
 
@@ -82,9 +142,44 @@ Role toSdk(protocol::Role role)
     return Role::Custom;
 }
 
-User toSdk(const protocol::UserInfo &u)
+User toSdk(const protocol::UserInfo &u, const client::ClientState &state)
 {
-    return {u.id, u.name, toSdk(u.role), u.channelId};
+    User user;
+    user.id = u.id;
+    user.name = u.name;
+    user.role = toSdk(u.role);
+    user.channelId = u.channelId;
+    user.roleName = state.roleName(static_cast<quint32>(u.role));
+    user.bot = (u.flags & protocol::BotFlag) != 0;
+    user.voiceMuted = (u.flags & protocol::VoiceMutedFlag) != 0;
+    user.textMuted = (u.flags & protocol::TextMutedFlag) != 0;
+    return user;
+}
+
+AudioStream toSdk(protocol::AudioStream stream)
+{
+    switch (stream) {
+    case protocol::AudioStream::Voice:
+        return AudioStream::Voice;
+    case protocol::AudioStream::Media:
+        return AudioStream::Media;
+    case protocol::AudioStream::SystemAudio:
+        return AudioStream::SystemAudio;
+    }
+    return AudioStream::Voice;
+}
+
+protocol::AudioStream toProtocol(AudioStream stream)
+{
+    switch (stream) {
+    case AudioStream::Voice:
+        return protocol::AudioStream::Voice;
+    case AudioStream::Media:
+        return protocol::AudioStream::Media;
+    case AudioStream::SystemAudio:
+        return protocol::AudioStream::SystemAudio;
+    }
+    return protocol::AudioStream::Voice;
 }
 
 Channel toSdk(const protocol::ChannelInfo &c)
@@ -119,12 +214,20 @@ Client::Client(QObject *parent)
     const client::ClientState &state = c.serverState();
     connect(&state, &client::ClientState::channelAdded, this, &Client::channelsChanged);
     connect(&state, &client::ClientState::channelRemoved, this, &Client::channelsChanged);
+    connect(&state, &client::ClientState::channelUpdated, this, &Client::channelsChanged);
     connect(&state, &client::ClientState::userJoined, this,
-            [this](const protocol::UserInfo &u) { emit userJoined(toSdk(u)); });
+            [this](const protocol::UserInfo &u) { emit userJoined(toSdk(u, d->connection.serverState())); });
     connect(&state, &client::ClientState::userLeft, this,
-            [this](const protocol::UserInfo &u) { emit userLeft(toSdk(u)); });
+            [this](const protocol::UserInfo &u) { emit userLeft(toSdk(u, d->connection.serverState())); });
     connect(&state, &client::ClientState::userMoved, this,
-            [this](const protocol::UserInfo &u, quint32) { emit userMoved(toSdk(u)); });
+            [this](const protocol::UserInfo &u, quint32) { emit userMoved(toSdk(u, d->connection.serverState())); });
+    connect(&state, &client::ClientState::userUpdated, this,
+            [this](const protocol::UserInfo &u, const protocol::UserInfo &) {
+                emit userUpdated(toSdk(u, d->connection.serverState()));
+            });
+    connect(&c, &client::Connection::voiceReady, this, &Client::audioReady);
+    connect(&c, &client::Connection::audioReceived, this,
+            [this](const protocol::AudioData &a) { emit audioReceived(a.userId, toSdk(a.stream), a.payload); });
     connect(&state, &client::ClientState::textReceived, this, [this](const protocol::TextMessage &m) {
         TextMessage out;
         switch (m.target) {
@@ -196,7 +299,7 @@ ServerInfo Client::serverInfo() const
 User Client::self() const
 {
     const client::ClientState &state = d->connection.serverState();
-    return toSdk(state.user(state.selfId()).value_or(protocol::UserInfo{}));
+    return toSdk(state.user(state.selfId()).value_or(protocol::UserInfo{}), state);
 }
 
 QList<Channel> Client::channels() const
@@ -212,7 +315,7 @@ QList<User> Client::users() const
 {
     QList<User> result;
     for (const protocol::UserInfo &u : d->connection.serverState().users()) {
-        result.append(toSdk(u));
+        result.append(toSdk(u, d->connection.serverState()));
     }
     return result;
 }
@@ -230,6 +333,26 @@ quint64 Client::sendChannelMessage(const QString &text)
 quint64 Client::sendDirectMessage(quint32 userId, const QString &text)
 {
     return d->connection.sendText(protocol::TextTarget::User, userId, text);
+}
+
+quint64 Client::sendServerMessage(const QString &text)
+{
+    return d->connection.sendText(protocol::TextTarget::Server, 0, text);
+}
+
+bool Client::isAudioReady() const
+{
+    return d->connection.isVoiceReady();
+}
+
+bool Client::sendAudio(const QByteArray &opusPacket, AudioStream stream)
+{
+    quint16 &sequence = d->sequence[static_cast<int>(stream)];
+    if (!d->connection.sendAudio(toProtocol(stream), sequence, opusPacket)) {
+        return false;
+    }
+    ++sequence;
+    return true;
 }
 
 bool Client::ping()

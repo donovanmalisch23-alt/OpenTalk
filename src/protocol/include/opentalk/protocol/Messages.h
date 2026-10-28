@@ -120,6 +120,7 @@ enum UserFlag : quint32 {
     VoiceMutedFlag = 0x1, ///< Muted by a moderator (cannot talk).
     TextMutedFlag = 0x2,  ///< Cannot send messages.
     RestrictedFlag = 0x4, ///< Under a restriction sanction.
+    BotFlag = 0x8,        ///< The account is a bot (a program, not a person).
 };
 
 // Limits, in UTF-16 code units unless stated otherwise.

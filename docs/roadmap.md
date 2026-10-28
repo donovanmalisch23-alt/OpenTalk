@@ -92,11 +92,19 @@ Deliverables: [project brief](project-brief.md), [risk assessment](risk-assessme
 - **Found and fixed on the way:** a kicked or banned client used to treat the server's final error as a dropped connection and reconnect. The protocol now states that an error without a request ID ends the session, and the client keeps the server's reason.
 - **Not yet:** see the [moderation model](security/moderation-model.md#not-yet-implemented) (address ranges, reporting single messages, mass-action safeguard).
 
-## Phase 6: Plugins
+## Phase 6: Plugins and bots (done, except legal review and the NVDA pass)
 
-Manifest, plugin host process, IPC, capability grants and the consent UI, an example plugin, bot accounts, a plugin licensing policy (with legal review).
+| ID | Milestone | Status |
+|---|---|---|
+| M6.1 | Manifest format, plugin registry with consent records, one process per plugin with JSON-lines IPC and limits, capability enforcement ([ADR 0006](architecture/decisions/0006-plugin-isolation.md), [reference](plugins/ipc.md)) | Done; `tst_plugin_manifest`, `tst_plugins` |
+| M6.2 | Plugin manager, consent dialog, Plugins menu, notifications, `--no-plugins` | Done; `tst_plugin_ui` |
+| M6.3 | Example plugins: dice roller (C++), "who is here" (Python) | Done; both run in `tst_plugins`; the C++ one is packaged and smoke-tested on Windows |
+| M6.4 | Bot accounts (database schema 3, `--bot`, marking in lists and the audit log), SDK 0.3 with audio, example greeter bot | Done; `tst_moderation_server`, `tst_examples` |
+| M6.5 | [Developer guide](plugins/developer-guide.md), [user guide](user-guide/plugins.md), [licensing policy draft](plugins/licensing.md), NVDA steps 58–64 | Done |
+| M6.6 | Legal review of the plugin licensing policy | **Open: owner decision** |
+| M6.7 | Manual NVDA pass of steps 58–64 | **Open: needs the owner or a tester** |
 
-**Exit:** an independently built example plugin installs, runs, is disabled and is removed through the documented workflow.
+**Exit criterion:** "an independently built example plugin installs, runs, is disabled and is removed through the documented workflow." Met in automated tests: the dice plugin is built as its own program with no OpenTalk code, installed from its folder, turned on through the consent dialog, used from the Plugins menu, turned off and removed (`tst_plugins`, `tst_plugin_ui`). Remaining: the manual NVDA pass.
 
 ## Phase 7: Advanced audio and system-audio sharing
 

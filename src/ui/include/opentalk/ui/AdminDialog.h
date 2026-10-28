@@ -89,6 +89,7 @@ private:
     QLineEdit *m_password = nullptr;
     QLineEdit *m_confirm = nullptr;
     QComboBox *m_role = nullptr;
+    QCheckBox *m_bot = nullptr;
 };
 
 /// Asks for a new password twice.

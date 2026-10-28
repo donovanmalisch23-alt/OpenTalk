@@ -22,6 +22,7 @@ It asks for the password twice (at least 8 characters) without showing it. A ser
 | Command | What it does |
 |---|---|
 | `--list-accounts` | Lists accounts and their roles. |
+| `--create-account <name> --bot` | Creates an account for a bot (a program). Everyone sees it marked as a bot. |
 | `--set-password <name>` | Changes a password. |
 | `--delete-account <name>` | Deletes an account. |
 | `--recover-owner <name>` | Makes an existing account the owner, if the owner is locked out. Stop the server first. |

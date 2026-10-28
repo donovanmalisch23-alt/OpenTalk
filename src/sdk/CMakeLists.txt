@@ -8,4 +8,4 @@ add_library(OpenTalk::Sdk ALIAS opentalk_sdk)
 target_include_directories(opentalk_sdk PUBLIC include)
 target_link_libraries(opentalk_sdk
     PUBLIC Qt6::Core
-    PRIVATE OpenTalk::Client OpenTalk::Security OpenTalk::CompilerOptions)
+    PRIVATE OpenTalk::Client OpenTalk::Security OpenTalk::Audio OpenTalk::CompilerOptions)

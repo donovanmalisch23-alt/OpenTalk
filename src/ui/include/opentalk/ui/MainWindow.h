@@ -19,10 +19,16 @@
 
 class QAction;
 class QLabel;
+class QMenu;
 class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QSplitter;
+
+namespace opentalk::plugins {
+class PluginHost;
+class PluginRegistry;
+} // namespace opentalk::plugins
 
 namespace opentalk::storage {
 class AppPaths;
@@ -48,6 +54,7 @@ class ChannelTree;
 ///   Ctrl+T            talk on/off (push-to-talk mode)   Ctrl+M  mute microphone
 ///   Ctrl+Shift+M      mute everything you hear          Ctrl+Shift+V  volume for the selected user
 ///   Ctrl+Shift+A      administration (for moderators and administrators)
+///   Alt+P             Plugins menu (manage plugins, and the plugins' own commands)
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -92,6 +99,11 @@ public:
     /// Where opentalk-server is; by default next to this program.
     void setLocalServerExecutable(const QString &path) { m_localServerExecutable = path; }
     QAction *settingsAction() const { return m_settingsAction; }
+    plugins::PluginRegistry &pluginRegistry() { return *m_pluginRegistry; }
+    plugins::PluginHost &pluginHost() { return *m_pluginHost; }
+    QMenu *pluginsMenu() const { return m_pluginsMenu; }
+    /// Starts the plugins the user turned on (the app does this unless --no-plugins).
+    void startPlugins();
     QList<QAction *> paneActions() const { return m_paneActions; }
 
     // Hooks that replace dialogs and speech, for automated tests.
@@ -123,6 +135,7 @@ public slots:
     void openMySanctions();
     void openAdministration();
     void sendBroadcast();
+    void openPluginManager();
     /// Opens the warn/mute/kick/ban dialog for the selected user, preset to `type`.
     void moderateSelectedUser(opentalk::moderation::SanctionType type);
 
@@ -154,6 +167,8 @@ private:
     void onRequestFinished(quint64 requestId, const std::optional<protocol::Error> &error);
     void onSanctionNotice(const protocol::SanctionInfo &sanction);
     void onUserUpdated(const protocol::UserInfo &user, const protocol::UserInfo &before);
+    void buildPlugins();
+    void rebuildPluginsMenu();
     /// Remembers what to say when request `id` succeeds or fails.
     void track(quint64 id, const QString &failure, const QString &success = {});
     void handleUntrustedCertificate(const client::DisconnectInfo &info);
@@ -219,6 +234,9 @@ private:
     QAction *m_reportAction = nullptr;
     QAction *m_mySanctionsAction = nullptr;
     QAction *m_adminAction = nullptr;
+    QMenu *m_pluginsMenu = nullptr;
+    std::unique_ptr<plugins::PluginRegistry> m_pluginRegistry;
+    plugins::PluginHost *m_pluginHost = nullptr;
     QList<QAction *> m_paneActions;
 };
 

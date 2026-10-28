@@ -33,6 +33,16 @@ Owners and administrators can create **custom roles** (rank 2 to 89) with any of
   `--role` also accepts `admin`, `moderator`, `user` and `restricted`.
 - **Upgrading from Phase 3 or 4:** the database is upgraded on first start (a copy of the old file is kept as `opentalk.db.v1-backup`). The earliest administrator becomes the owner, and this is written to the audit log.
 
+## Bots
+
+Bots are programs that log in to accounts of their own, such as the example [greeter bot](../../examples/greeter-bot/main.cpp). Mark their accounts as bots, so everyone sees "bot" next to the name and the audit log names their actions "name (bot)":
+
+```bat
+opentalk-server --data-dir C:\OpenTalkServer --create-account greeter --bot
+```
+
+or tick **This account is for a bot** when creating it in **Administration → Accounts**. A bot has exactly the permissions of its role, nothing more. Give it the smallest role that works; a bot that moderates needs a moderator role, and the usual rank rules apply to it. See the [SDK guide](../sdk/README.md#bots) for writing one.
+
 ## Locked out? Recover the owner
 
 If the owner's password is lost or the account was damaged, someone with access to the server's files can make an existing account the owner. **Stop the server first**, then:

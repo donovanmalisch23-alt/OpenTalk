@@ -73,6 +73,45 @@ private slots:
         QVERIFY(h->login(3, QStringLiteral("alice")));
     }
 
+    void botsAreMarkedForEveryoneAndInTheAuditLog()
+    {
+        auto h = moderatedServer();
+        h->addAccount(QStringLiteral("helper"), Role::Moderator);
+        QVERIFY(h->db.setBot(QStringLiteral("helper"), true));
+        QVERIFY(h->login(1, QStringLiteral("alice")));
+        QVERIFY(h->login(2, QStringLiteral("helper")));
+        const auto joined = h->last<UserJoined>(1);
+        QVERIFY(joined && joined->user.name == QStringLiteral("helper"));
+        QVERIFY((joined->user.flags & BotFlag) != 0);
+        // A bot moderates under its own account, and the log says it is a bot.
+        h->send(2, sanctionOn(1, 1, SanctionType::Warning));
+        QCOMPARE(h->answer(2, 1), std::optional<ErrorCode>());
+        const auto entries = h->db.auditEntries(0, 5);
+        QVERIFY(std::any_of(entries.cbegin(), entries.cend(), [](const auto &e) {
+            return e.action == QLatin1String("sanction.warning") && e.actorName == QLatin1String("helper (bot)");
+        }));
+        // Mutes and other flags keep the bot flag. (A moderator cannot mute it: equal rank.)
+        QVERIFY(h->login(3, QStringLiteral("mod")));
+        h->send(3, sanctionOn(2, 2, SanctionType::Mute, 600));
+        QVERIFY(h->answer(3, 2) == std::optional<ErrorCode>(ErrorCode::NotAuthorized));
+        QVERIFY(h->login(4, QStringLiteral("owner")));
+        h->send(4, sanctionOn(2, 2, SanctionType::Mute, 600));
+        QCOMPARE(h->answer(4, 2), std::optional<ErrorCode>());
+        QCOMPARE(h->last<UserUpdated>(1)->flags & (BotFlag | VoiceMutedFlag), BotFlag | VoiceMutedFlag);
+
+        // Administrators can create bot accounts, and see which accounts are bots.
+        h->send(4, CreateAccount{3, QStringLiteral("dj"), QStringLiteral("long password"), 1, true});
+        QTRY_VERIFY(h->answer(4, 3).has_value() || h->has<RequestDone>(4));
+        QVERIFY(h->db.findAccount(QStringLiteral("dj"))->bot);
+        h->send(4, ListRequest{4, ListKind::Accounts, true});
+        QCOMPARE(h->answer(4, 4), std::optional<ErrorCode>());
+        const auto accounts = h->last<ListResult>(4)->accounts;
+        QVERIFY(std::any_of(accounts.cbegin(), accounts.cend(),
+                            [](const AccountInfo &a) { return a.name == QLatin1String("dj") && a.bot; }));
+        QVERIFY(std::any_of(accounts.cbegin(), accounts.cend(),
+                            [](const AccountInfo &a) { return a.name == QLatin1String("alice") && !a.bot; }));
+    }
+
     void oldAuditEntriesAreRemovedDaily()
     {
         auto h = moderatedServer();

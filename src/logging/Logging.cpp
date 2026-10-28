@@ -14,6 +14,7 @@ Q_LOGGING_CATEGORY(lcStorage, "opentalk.storage")
 Q_LOGGING_CATEGORY(lcSecurity, "opentalk.security")
 Q_LOGGING_CATEGORY(lcClient, "opentalk.client")
 Q_LOGGING_CATEGORY(lcServer, "opentalk.server")
+Q_LOGGING_CATEGORY(lcPlugins, "opentalk.plugins")
 
 namespace opentalk::logging {
 namespace {

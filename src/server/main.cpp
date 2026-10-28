@@ -85,7 +85,8 @@ std::optional<QString> readNewPassword(QString *error)
 
 int runAccountCommand(const QCommandLineParser &parser, const QCommandLineOption &create,
                       const QCommandLineOption &setPassword, const QCommandLineOption &remove,
-                      const QCommandLineOption &list, const QCommandLineOption &roleOption, server::ServerDatabase &db)
+                      const QCommandLineOption &list, const QCommandLineOption &roleOption, bool bot,
+                      server::ServerDatabase &db)
 {
     if (parser.isSet(list)) {
         const QList<server::Account> accounts = db.accounts();
@@ -93,7 +94,8 @@ int runAccountCommand(const QCommandLineParser &parser, const QCommandLineOption
             printLine(QStringLiteral("No accounts."));
         }
         for (const server::Account &a : accounts) {
-            printLine(QStringLiteral("%1 (%2)").arg(a.username, server::toString(a.role)));
+            printLine(QStringLiteral("%1 (%2%3)")
+                          .arg(a.username, server::toString(a.role), a.bot ? QStringLiteral(", bot") : QString()));
         }
         return 0;
     }
@@ -115,14 +117,19 @@ int runAccountCommand(const QCommandLineParser &parser, const QCommandLineOption
         if (!hash || !db.createAccount(name, *hash, *role, &error)) {
             return fail(hash ? error : QStringLiteral("could not hash the password"));
         }
+        if (bot && !db.setBot(name, true)) {
+            return fail(QStringLiteral("the account was created but could not be marked as a bot"));
+        }
         moderation::AuditEntry entry;
         entry.timeMs = QDateTime::currentMSecsSinceEpoch();
         entry.actorName = QStringLiteral("(command line)");
         entry.action = QStringLiteral("account.created");
         entry.target = name;
-        entry.details = QStringLiteral("role=%1").arg(server::toString(*role));
+        entry.details =
+            QStringLiteral("role=%1").arg(server::toString(*role)) + (bot ? QStringLiteral("; bot") : QString());
         db.appendAudit(entry);
-        printLine(QStringLiteral("Created %1 account \"%2\".").arg(server::toString(*role), name));
+        printLine(QStringLiteral("Created %1%3 account \"%2\".")
+                      .arg(server::toString(*role), name, bot ? QStringLiteral(" bot") : QString()));
         return 0;
     }
     if (parser.isSet(setPassword)) {
@@ -203,6 +210,9 @@ int main(int argc, char *argv[])
                                         QStringLiteral("Role for --create-account: user, moderator, admin or owner "
                                                        "(default: user). A server has one owner."),
                                         QStringLiteral("role"), QStringLiteral("user"));
+    const QCommandLineOption botOption(QStringLiteral("bot"),
+                                       QStringLiteral("With --create-account: the account is for a bot (a program). "
+                                                      "Everyone sees it marked as a bot."));
     const QCommandLineOption setPasswordOption(QStringLiteral("set-password"),
                                                QStringLiteral("Change an account's password and exit."),
                                                QStringLiteral("username"));
@@ -231,7 +241,8 @@ int main(int argc, char *argv[])
     parser.addOptions({dataOption,    listenOption,      portOption,        certOption,      keyOption,
                        nameOption,    maxOption,         guestsOption,      noUdpOption,     logOption,
                        createOption,  roleOption,        setPasswordOption, deleteOption,    listOption,
-                       recoverOption, verifyAuditOption, exportAuditOption, retentionOption, stdinOption});
+                       recoverOption, verifyAuditOption, exportAuditOption, retentionOption, stdinOption,
+                       botOption});
     parser.process(app);
 
     const std::optional<logging::Level> level = logging::levelFromString(parser.value(logOption));
@@ -255,8 +266,8 @@ int main(int argc, char *argv[])
         return fail(error);
     }
 
-    const int accountResult =
-        runAccountCommand(parser, createOption, setPasswordOption, deleteOption, listOption, roleOption, database);
+    const int accountResult = runAccountCommand(parser, createOption, setPasswordOption, deleteOption, listOption,
+                                                roleOption, parser.isSet(botOption), database);
     if (accountResult >= 0) {
         return accountResult;
     }

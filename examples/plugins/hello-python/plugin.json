@@ -1,0 +1,13 @@
+{
+    "id": "org.opentalk.examples.hello-python",
+    "name": "Who is here (Python example)",
+    "version": "1.0.0",
+    "description": "Adds \"Who is here?\" to the Plugins menu. It reads the list of people and tells you how many are on the server. An example of a plugin written in Python.",
+    "author": "The OpenTalk contributors",
+    "license": "GPL-3.0-only",
+    "homepage": "https://github.com/donovanmalisch23-alt/OpenTalk",
+    "apiVersion": 1,
+    "interpreter": "python3",
+    "executable": "hello.py",
+    "capabilities": ["presence.read", "notifications.show", "commands.add"]
+}

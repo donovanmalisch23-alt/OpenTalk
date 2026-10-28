@@ -98,3 +98,16 @@ Host a server (steps 19–20) so you are its owner. On a second computer or a se
 | 55 | On the second copy: Moderation → Report selected user (select the first person), type what happened, Enter. Then on the first computer: Reports tab, F5. | The report is listed with the reporter's name and reason. "Mark as handled…" and "Dismiss…" work and the result is announced. |
 | 56 | On the second copy: Moderation → My sanctions and appeals. Select the warning, press "Appeal the selected sanction…", type a reason, OK. | "Your appeal was sent." On the first computer the Appeals tab shows it. Because you gave the warning and nobody else can decide, "Decide…" works for you; choose Overturn, a reason, Decide. The second copy is told "Your warning was overturned on appeal." |
 | 57 | Kick the second copy (Moderation → Kick selected user, reason, Enter). | The second copy shows a "Kicked" message with the reason and does **not** reconnect by itself. |
+
+## Plugins (Phase 6)
+
+| # | Do | Expect |
+|---|---|---|
+| 58 | Alt+P. | The Plugins menu reads "Manage plugins…". |
+| 59 | Enter. | "Plugins, dialog". The list reads "No plugins installed"; the details below explain what plugins are. |
+| 60 | Install from folder…, choose `examples\plugins\dice` in the OpenTalk folder. | "Installed Dice roller. Turn it on to use it." The list item reads "Dice roller, version 1.0.0, off". |
+| 61 | Turn on…. | "Turn on Dice roller?, dialog". The description and the warning about trusting plugins can be read. Focus is in "Permissions"; each item reads its text and "checked", and sensitive ones begin with "Sensitive:". Space unticks and ticks. Turn on. |
+| 62 | Close the dialog. Alt+P. | The menu now also has "Roll a dice (Dice roller)". Choosing it puts "(your name) rolled …" in the history, read by NVDA as a channel message. |
+| 63 | Alt+P, Manage plugins, select Dice roller, Show log. | "Log of Dice roller, dialog"; the log text can be read line by line. Escape closes it. |
+| 64 | Turn off, then Remove…, Remove everything. | "Dice roller is off.", then "Removed Dice roller." The Plugins menu has only "Manage plugins…" again. |
+

@@ -4,7 +4,7 @@
 
 OpenTalk lets communities run their own voice and text chat servers, with channels, push-to-talk, moderation tools and plugins, and no central company in the middle. It is inspired by the functionality of TeamTalk 5 but is an independent project with its own protocol, SDK and code, written in C++ with Qt.
 
-> **Status: early development (version 0.1.0).** Text chat and voice work: host a server from the app or run `opentalk-server`, then log in, use channels, talk (push-to-talk, voice activation or always-on), and send channel, private and server-wide messages. Owners and moderators have roles, sanctions, reports, appeals and an audit log. Control traffic uses TLS 1.3 and voice is encrypted too. Voice is tested automatically with simulated sound devices but **has not yet been tried on real sound hardware**. See [docs/status.md](docs/status.md) for exactly what works and what has been verified.
+> **Status: early development (version 0.1.0).** Text chat and voice work: host a server from the app or run `opentalk-server`, then log in, use channels, talk (push-to-talk, voice activation or always-on), and send channel, private and server-wide messages. Owners and moderators have roles, sanctions, reports, appeals and an audit log. Plugins and bots extend it. Control traffic uses TLS 1.3 and voice is encrypted too. Voice is tested automatically with simulated sound devices but **has not yet been tried on real sound hardware**. See [docs/status.md](docs/status.md) for exactly what works and what has been verified.
 
 ## Principles
 
@@ -23,9 +23,9 @@ OpenTalk lets communities run their own voice and text chat servers, with channe
 
 To try chatting: **Server menu → Host a server on this computer**, choose a name and password for yourself (you become the server's owner), and press Enter. To join a friend's server: **Ctrl+O**.
 
-Keyboard: **F6** cycles between panes, **Ctrl+1** to **Ctrl+4** jump to channels, users, history and message input, **Enter** on a channel joins it, **Ctrl+N** creates a channel, **Ctrl+P** sends a private message, **Alt+O** opens the Moderation menu, **Ctrl+Shift+A** opens Administration, and **F4** opens Settings. The full list is in the [accessibility plan](docs/accessibility/plan.md#keyboard-map-implemented).
+Keyboard: **F6** cycles between panes, **Ctrl+1** to **Ctrl+4** jump to channels, users, history and message input, **Enter** on a channel joins it, **Ctrl+N** creates a channel, **Ctrl+P** sends a private message, **Alt+O** opens the Moderation menu, **Ctrl+Shift+A** opens Administration, **Alt+P** opens the Plugins menu, and **F4** opens Settings. The full list is in the [accessibility plan](docs/accessibility/plan.md#keyboard-map-implemented).
 
-The zip also contains `opentalk-server.exe` and `opentalk-ping.exe`. See the [server quick start](docs/server-administration/quick-start.md).
+The zip also contains `opentalk-server.exe`, `opentalk-ping.exe`, the example bot `opentalk-greeter-bot.exe` and example plugins in `examples\plugins`. See the [server quick start](docs/server-administration/quick-start.md), the [plugin guide](docs/user-guide/plugins.md) and the [SDK guide](docs/sdk/README.md).
 
 ## Build from source
 

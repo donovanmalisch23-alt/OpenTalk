@@ -331,15 +331,16 @@ void ServerCore::authenticate(Client &client, const Authenticate &request)
             emit closeSession(existing->id, ErrorCode::NameInUse, QStringLiteral("logged in from somewhere else"));
             sessionEnded(existing->id);
         }
-        goOnline(*it, account->username, account->role, account->id);
+        goOnline(*it, account->username, account->role, account->id, account->bot);
     });
 }
 
-void ServerCore::goOnline(Client &client, const QString &name, Role role, qint64 accountId)
+void ServerCore::goOnline(Client &client, const QString &name, Role role, qint64 accountId, bool bot)
 {
     client.state = ClientState::Online;
     client.accountId = accountId;
-    client.user = UserInfo{client.id, name, role, kRootChannelId, 0};
+    client.bot = bot;
+    client.user = UserInfo{client.id, name, role, kRootChannelId, bot ? quint32{BotFlag} : 0u};
     client.effectiveRole = static_cast<moderation::RoleId>(role);
     m_channels[kRootChannelId].members.insert(client.id);
     qCInfo(lcServer).noquote() << "Session" << client.id << "logged in as" << name << "(" << toString(role) << ")";

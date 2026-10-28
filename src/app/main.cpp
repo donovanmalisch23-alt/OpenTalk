@@ -43,6 +43,9 @@ int main(int argc, char *argv[])
                                            QStringLiteral("Store settings and logs in <directory>."),
                                            QStringLiteral("directory"));
     parser.addOption(dataDirOption);
+    const QCommandLineOption noPluginsOption(
+        QStringLiteral("no-plugins"), QStringLiteral("Start without running any plugins (for troubleshooting)."));
+    parser.addOption(noPluginsOption);
     parser.process(app);
 
     const storage::AppPaths paths =
@@ -89,6 +92,11 @@ int main(int argc, char *argv[])
     }
     if (!warnings.isEmpty()) {
         QMessageBox::warning(&window, QStringLiteral("OpenTalk"), warnings.join(QStringLiteral("\n\n")));
+    }
+    if (parser.isSet(noPluginsOption)) {
+        qCInfo(lcApp) << "Plugins are not started (--no-plugins)";
+    } else {
+        window.startPlugins();
     }
 
     const int exitCode = QApplication::exec();

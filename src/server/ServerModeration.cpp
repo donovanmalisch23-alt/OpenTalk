@@ -173,7 +173,7 @@ void ServerCore::refreshUser(Client &client)
     const qint64 now = m_wallClock();
     const moderation::SanctionSubject subject = subjectOf(client);
     const QList<quint32> chain = chainOf(client.user.channelId);
-    quint32 flags = 0;
+    quint32 flags = client.bot ? quint32{BotFlag} : 0u;
     moderation::RoleId effective = static_cast<moderation::RoleId>(client.user.role);
     if (m_sanctions.isRestricted(subject, now) && client.user.role != Role::Owner) {
         flags |= RestrictedFlag;
@@ -246,7 +246,10 @@ void ServerCore::audit(const Client *actor, const QString &action, const QString
     moderation::AuditEntry entry;
     entry.timeMs = m_wallClock();
     entry.actorAccountId = actor != nullptr ? actor->accountId : 0;
-    entry.actorName = actor != nullptr ? actor->user.name : QString();
+    // Bots act under their own accounts; the log says so.
+    entry.actorName = actor == nullptr ? QString()
+                      : actor->bot     ? actor->user.name + QStringLiteral(" (bot)")
+                                       : actor->user.name;
     entry.action = action;
     entry.target = target.left(256);
     entry.channelId = channelId;
@@ -659,7 +662,7 @@ void ServerCore::list(Client &actor, const ListRequest &request)
         }
         if (m_database != nullptr) {
             for (const Account &a : m_database->accounts()) {
-                result.accounts.append(AccountInfo{a.username, static_cast<quint32>(a.role), a.disabled});
+                result.accounts.append(AccountInfo{a.username, static_cast<quint32>(a.role), a.disabled, a.bot});
             }
         }
         break;
@@ -1227,13 +1230,14 @@ void ServerCore::createAccount(Client &actor, const CreateAccount &request)
             return;
         }
         QString error;
-        if (!hash || !m_database->createAccount(request.name, *hash, static_cast<Role>(request.roleId), &error)) {
+        if (!hash || !m_database->createAccount(request.name, *hash, static_cast<Role>(request.roleId), &error) ||
+            (request.bot && !m_database->setBot(request.name, true))) {
             refuse(actorId, request.requestId, ErrorCode::InvalidRequest,
                    error.isEmpty() ? QStringLiteral("could not create the account") : error);
             return;
         }
         audit(a, QStringLiteral("account.created"), request.name, 0, QString(),
-              QStringLiteral("role=%1").arg(request.roleId));
+              QStringLiteral("role=%1").arg(request.roleId) + (request.bot ? QStringLiteral("; bot") : QString()));
         reply(actorId, request.requestId);
     });
 }

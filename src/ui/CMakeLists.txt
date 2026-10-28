@@ -8,6 +8,7 @@ add_library(opentalk_ui STATIC
     include/opentalk/ui/ConnectDialog.h
     include/opentalk/ui/MainWindow.h
     include/opentalk/ui/ModerationDialogs.h
+    include/opentalk/ui/PluginDialogs.h
     include/opentalk/ui/PushToTalkMonitor.h
     include/opentalk/ui/SettingsDialog.h
     AdminDialog.cpp
@@ -18,6 +19,7 @@ add_library(opentalk_ui STATIC
     ConnectDialog.cpp
     MainWindow.cpp
     ModerationDialogs.cpp
+    PluginDialogs.cpp
     RequestTracker.h
     UiHelpers.h
     PushToTalkMonitor.cpp
@@ -26,6 +28,7 @@ add_library(OpenTalk::Ui ALIAS opentalk_ui)
 target_include_directories(opentalk_ui PUBLIC include)
 target_link_libraries(opentalk_ui
     PUBLIC Qt6::Widgets OpenTalk::Storage OpenTalk::Logging OpenTalk::Client OpenTalk::Audio OpenTalk::Moderation
+           OpenTalk::Plugins
     PRIVATE OpenTalk::CompilerOptions)
 target_compile_definitions(opentalk_ui PRIVATE
     OPENTALK_VERSION_STRING="${PROJECT_VERSION}")

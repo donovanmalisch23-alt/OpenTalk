@@ -52,7 +52,7 @@ Qt exposes widgets to screen readers through **UI Automation** on Windows. Stand
 | Ctrl+Shift+A | Administration (moderators and administrators) |
 | Ctrl+Tab / Ctrl+Shift+Tab, F5 (Administration) | Next / previous tab; reload the tab |
 | Ctrl+Q | Exit |
-| Alt+F, Alt+R, Alt+N, Alt+A, Alt+O, Alt+V, Alt+H | File, Server, Channel, Audio, Moderation, View and Help menus |
+| Alt+F, Alt+R, Alt+N, Alt+A, Alt+O, Alt+P, Alt+V, Alt+H | File, Server, Channel, Audio, Moderation, Plugins, View and Help menus |
 
 Menu mnemonics deliberately avoid the pane labels' Alt+C, Alt+S, Alt+M and Alt+U. New shortcuts are added to this table and checked for conflicts.
 

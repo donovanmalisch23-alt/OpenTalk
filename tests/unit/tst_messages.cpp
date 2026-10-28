@@ -94,6 +94,114 @@ private slots:
         QTest::newRow("audio from client")
             << Message(AudioData{AudioStream::Voice, 65535, 0, QByteArray(kMaxAudioPayloadBytes, '\x7f')});
         QTest::newRow("audio from server") << Message(AudioData{AudioStream::SystemAudio, 1, 42, QByteArray("x")});
+
+        // Moderation and administration (docs/protocol/moderation.md).
+        const UserInfo muted{8, QStringLiteral("bob"), Role::Moderator, 1000, VoiceMutedFlag | BotFlag};
+        QTest::newRow("user with flags") << Message(UserJoined{muted});
+        QTest::newRow("channel updated") << Message(ChannelUpdated{lobby});
+        QTest::newRow("edit channel") << Message(
+            EditChannel{11, 1000, QStringLiteral("Lobby 2"), QStringLiteral("New"), 5, true, QStringLiteral("pw")});
+        QTest::newRow("edit channel removing password")
+            << Message(EditChannel{11, 1000, QStringLiteral("Lobby"), QString(), 0, true, QString()});
+        QTest::newRow("user updated") << Message(UserUpdated{8, 105, TextMutedFlag | RestrictedFlag});
+        QTest::newRow("roles changed") << Message(
+            RolesChanged{{moderator, RoleInfo{105, QStringLiteral("Greeter"), 20, {31}, false}}});
+        QTest::newRow("capabilities changed") << Message(CapabilitiesChanged{{1, 10, 11}, {33}});
+        SanctionInfo sanction{12,
+                              5,
+                              1000,
+                              QStringLiteral("troll"),
+                              QStringLiteral("troll"),
+                              QStringLiteral("10.0.0.5"),
+                              QStringLiteral("mod"),
+                              QStringLiteral("spam"),
+                              1790000000000,
+                              1790003600000,
+                              2,
+                              QStringLiteral("boss"),
+                              QStringLiteral("apologised")};
+        QTest::newRow("sanction notice") << Message(SanctionNotice{sanction});
+        QTest::newRow("guest sanction notice") << Message(SanctionNotice{
+            SanctionInfo{13, 0, 0, QStringLiteral("Visitor"), {}, {}, QStringLiteral("mod"), {}, 1, 0, 0, {}, {}}});
+        QTest::newRow("move user") << Message(MoveUser{12, 8, 1000});
+        QTest::newRow("apply sanction to someone online")
+            << Message(ApplySanction{13, 8, QString(), 3, 1000, 3600, QStringLiteral("shouting"), false});
+        QTest::newRow("apply sanction to an account")
+            << Message(ApplySanction{14, 0, QStringLiteral("troll"), 5, 0, 0, QStringLiteral("spam"), true});
+        QTest::newRow("revoke sanction") << Message(RevokeSanction{15, 12, QStringLiteral("fair enough")});
+        QTest::newRow("list request") << Message(ListRequest{16, ListKind::Appeals, true});
+        ListResult sanctions{17, ListKind::Sanctions, {sanction}, {}, {}, {}, {}};
+        QTest::newRow("list of sanctions") << Message(sanctions);
+        QTest::newRow("list of reports") << Message(
+            ListResult{17,
+                       ListKind::Reports,
+                       {},
+                       {ReportInfo{1, QStringLiteral("alice"), QStringLiteral("troll"), QStringLiteral("troll"),
+                                   QStringLiteral("rude"), 5, 1, QStringLiteral("mod"), QStringLiteral("done")}},
+                       {},
+                       {},
+                       {}});
+        QTest::newRow("list of appeals") << Message(
+            ListResult{17,
+                       ListKind::Appeals,
+                       {},
+                       {},
+                       {AppealInfo{2, 12, QStringLiteral("troll"), QStringLiteral("sorry"), 6, 3,
+                                   QStringLiteral("boss"), QStringLiteral("ok")}},
+                       {},
+                       {}});
+        QTest::newRow("list of accounts")
+            << Message(ListResult{17,
+                                  ListKind::Accounts,
+                                  {},
+                                  {},
+                                  {},
+                                  {AccountInfo{QStringLiteral("alice"), 1, false, false},
+                                   AccountInfo{QStringLiteral("greeter"), 105, true, true}},
+                                  {}});
+        QTest::newRow("list of rules") << Message(
+            ListResult{17,
+                       ListKind::Rules,
+                       {},
+                       {},
+                       {},
+                       {},
+                       {RuleInfo{3, 1000, true, QStringLiteral("alice"), 0, 33, true},
+                        RuleInfo{4, 0, false, QString(), 1, 20, false}}});
+        QTest::newRow("set user role") << Message(SetUserRole{18, QStringLiteral("alice"), 4});
+        QTest::newRow("report user") << Message(ReportUser{19, 8, QStringLiteral("rude")});
+        QTest::newRow("resolve report") << Message(ResolveReport{20, 1, 2, QStringLiteral("not a problem")});
+        QTest::newRow("submit appeal") << Message(SubmitAppeal{21, 12, QStringLiteral("I was joking")});
+        QTest::newRow("decide appeal") << Message(DecideAppeal{22, 2, 2, QStringLiteral("shorter"), 600});
+        QTest::newRow("read audit") << Message(ReadAudit{23, 500, 100});
+        QTest::newRow("audit page") << Message(
+            AuditPage{23,
+                      {AuditEntryInfo{7, 1790000000000, QStringLiteral("mod"), QStringLiteral("sanction.ban"),
+                                      QStringLiteral("troll"), 0, QStringLiteral("spam"), QStringLiteral("sanction=12"),
+                                      QByteArray(32, '\x09')}},
+                      false,
+                      5});
+        QTest::newRow("create account") << Message(
+            CreateAccount{24, QStringLiteral("newbie"), QStringLiteral("long password"), 1, false});
+        QTest::newRow("create bot account")
+            << Message(CreateAccount{24, QStringLiteral("greeter"), QStringLiteral("long password"), 1, true});
+        QTest::newRow("delete account") << Message(DeleteAccount{25, QStringLiteral("newbie")});
+        QTest::newRow("set password") << Message(
+            SetAccountPassword{26, QStringLiteral("alice"), QStringLiteral("new one!")});
+        QTest::newRow("save role") << Message(SaveRole{27, RoleInfo{0, QStringLiteral("Helper"), 30, {31, 32}, false}});
+        QTest::newRow("delete role") << Message(DeleteRole{28, 105});
+        QTest::newRow("add rule") << Message(AddRule{29, RuleInfo{0, 1000, false, QString(), 1, 20, false}});
+        QTest::newRow("delete rule") << Message(DeleteRule{30, 3});
+        const ServerSettingsInfo settings{
+            QStringLiteral("My server"),       QStringLiteral("Welcome!"), true, 50, 64000, 7,
+            QStringLiteral("mods@example.org")};
+        QTest::newRow("read settings") << Message(ServerSettingsRequest{31, std::nullopt});
+        QTest::newRow("change settings") << Message(ServerSettingsRequest{31, settings});
+        QTest::newRow("settings result") << Message(ServerSettingsResult{31, settings});
+        QTest::newRow("get stats") << Message(GetServerStats{32});
+        QTest::newRow("stats result") << Message(
+            ServerStatsResult{32, ServerStatsInfo{3600, 4, 5, 6, 700, 2100, 3, 1, 2, 1, 40, true}});
+        QTest::newRow("transfer ownership") << Message(TransferOwnership{33, QStringLiteral("alice")});
     }
 
     void roundTrip()
