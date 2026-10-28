@@ -37,55 +37,72 @@ bool isModeratorView(const moderation::PermissionResolver &p, const moderation::
 
 // ------------------------------------------------------------------- dispatch
 
+namespace {
+
+template <typename T>
+constexpr bool kIsAdminRequest =
+    std::is_same_v<T, MoveUser> || std::is_same_v<T, ApplySanction> || std::is_same_v<T, RevokeSanction> ||
+    std::is_same_v<T, ListRequest> || std::is_same_v<T, SetUserRole> || std::is_same_v<T, ReportUser> ||
+    std::is_same_v<T, ResolveReport> || std::is_same_v<T, SubmitAppeal> || std::is_same_v<T, DecideAppeal> ||
+    std::is_same_v<T, ReadAudit> || std::is_same_v<T, CreateAccount> || std::is_same_v<T, DeleteAccount> ||
+    std::is_same_v<T, SetAccountPassword> || std::is_same_v<T, SaveRole> || std::is_same_v<T, DeleteRole> ||
+    std::is_same_v<T, AddRule> || std::is_same_v<T, DeleteRule> || std::is_same_v<T, ServerSettingsRequest> ||
+    std::is_same_v<T, GetServerStats> || std::is_same_v<T, TransferOwnership>;
+
+} // namespace
+
 bool ServerCore::handleAdminMessage(Client &client, const Message &message)
 {
     return std::visit(
         [this, &client](const auto &m) -> bool {
             using T = std::decay_t<decltype(m)>;
-            if constexpr (std::is_same_v<T, MoveUser>) {
-                moveOther(client, m);
-            } else if constexpr (std::is_same_v<T, ApplySanction>) {
-                applySanction(client, m);
-            } else if constexpr (std::is_same_v<T, RevokeSanction>) {
-                revokeSanction(client, m);
-            } else if constexpr (std::is_same_v<T, ListRequest>) {
-                list(client, m);
-            } else if constexpr (std::is_same_v<T, SetUserRole>) {
-                setUserRole(client, m);
-            } else if constexpr (std::is_same_v<T, ReportUser>) {
-                reportUser(client, m);
-            } else if constexpr (std::is_same_v<T, ResolveReport>) {
-                resolveReport(client, m);
-            } else if constexpr (std::is_same_v<T, SubmitAppeal>) {
-                submitAppeal(client, m);
-            } else if constexpr (std::is_same_v<T, DecideAppeal>) {
-                decideAppeal(client, m);
-            } else if constexpr (std::is_same_v<T, ReadAudit>) {
-                readAudit(client, m);
-            } else if constexpr (std::is_same_v<T, CreateAccount>) {
-                createAccount(client, m);
-            } else if constexpr (std::is_same_v<T, DeleteAccount>) {
-                deleteAccount(client, m);
-            } else if constexpr (std::is_same_v<T, SetAccountPassword>) {
-                setAccountPassword(client, m);
-            } else if constexpr (std::is_same_v<T, SaveRole>) {
-                saveRole(client, m);
-            } else if constexpr (std::is_same_v<T, DeleteRole>) {
-                deleteRole(client, m);
-            } else if constexpr (std::is_same_v<T, AddRule>) {
-                addRule(client, m);
-            } else if constexpr (std::is_same_v<T, DeleteRule>) {
-                deleteRule(client, m);
-            } else if constexpr (std::is_same_v<T, ServerSettingsRequest>) {
-                serverSettings(client, m);
-            } else if constexpr (std::is_same_v<T, GetServerStats>) {
-                serverStats(client, m);
-            } else if constexpr (std::is_same_v<T, TransferOwnership>) {
-                transferOwnership(client, m);
-            } else {
+            // Every branch returns, so no instantiation has unreachable code (MSVC C4702).
+            if constexpr (!kIsAdminRequest<T>) {
                 return false;
+            } else {
+                if constexpr (std::is_same_v<T, MoveUser>) {
+                    moveOther(client, m);
+                } else if constexpr (std::is_same_v<T, ApplySanction>) {
+                    applySanction(client, m);
+                } else if constexpr (std::is_same_v<T, RevokeSanction>) {
+                    revokeSanction(client, m);
+                } else if constexpr (std::is_same_v<T, ListRequest>) {
+                    list(client, m);
+                } else if constexpr (std::is_same_v<T, SetUserRole>) {
+                    setUserRole(client, m);
+                } else if constexpr (std::is_same_v<T, ReportUser>) {
+                    reportUser(client, m);
+                } else if constexpr (std::is_same_v<T, ResolveReport>) {
+                    resolveReport(client, m);
+                } else if constexpr (std::is_same_v<T, SubmitAppeal>) {
+                    submitAppeal(client, m);
+                } else if constexpr (std::is_same_v<T, DecideAppeal>) {
+                    decideAppeal(client, m);
+                } else if constexpr (std::is_same_v<T, ReadAudit>) {
+                    readAudit(client, m);
+                } else if constexpr (std::is_same_v<T, CreateAccount>) {
+                    createAccount(client, m);
+                } else if constexpr (std::is_same_v<T, DeleteAccount>) {
+                    deleteAccount(client, m);
+                } else if constexpr (std::is_same_v<T, SetAccountPassword>) {
+                    setAccountPassword(client, m);
+                } else if constexpr (std::is_same_v<T, SaveRole>) {
+                    saveRole(client, m);
+                } else if constexpr (std::is_same_v<T, DeleteRole>) {
+                    deleteRole(client, m);
+                } else if constexpr (std::is_same_v<T, AddRule>) {
+                    addRule(client, m);
+                } else if constexpr (std::is_same_v<T, DeleteRule>) {
+                    deleteRule(client, m);
+                } else if constexpr (std::is_same_v<T, ServerSettingsRequest>) {
+                    serverSettings(client, m);
+                } else if constexpr (std::is_same_v<T, GetServerStats>) {
+                    serverStats(client, m);
+                } else if constexpr (std::is_same_v<T, TransferOwnership>) {
+                    transferOwnership(client, m);
+                }
+                return true;
             }
-            return true;
         },
         message);
 }
