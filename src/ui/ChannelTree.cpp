@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "opentalk/ui/ChannelTree.h"
 
+#include "opentalk/audio/AudioFormat.h"
 #include "opentalk/client/ClientState.h"
 
 #include <QTreeWidgetItemIterator>
@@ -135,8 +136,8 @@ void ChannelTree::rebuild(const client::ClientState &state, const QString &serve
                                                      roleLabel(state, static_cast<quint32>(user.role)), user.flags)});
             userItem->setData(0, kKindRole, static_cast<int>(ItemKind::User));
             userItem->setData(0, kIdRole, user.id);
-            if (m_talking.contains(user.id)) {
-                applyTalking(userItem, true);
+            if (m_activity.contains(user.id)) {
+                applyActivity(userItem, m_activity.value(user.id));
             }
         }
     }
@@ -209,25 +210,42 @@ std::optional<quint32> ChannelTree::currentUserId() const
                                            : std::nullopt;
 }
 
-void ChannelTree::setUserTalking(quint32 userId, bool talking)
+void ChannelTree::setUserActivity(quint32 userId, int streams)
 {
-    if (talking) {
-        m_talking.insert(userId);
+    if (streams != 0) {
+        m_activity.insert(userId, streams);
     } else {
-        m_talking.remove(userId);
+        m_activity.remove(userId);
     }
     if (QTreeWidgetItem *item = findItem(ItemKind::User, userId)) {
-        applyTalking(item, talking);
+        applyActivity(item, streams);
     }
 }
 
-void ChannelTree::applyTalking(QTreeWidgetItem *item, bool talking)
+QString ChannelTree::activityText(int streams)
+{
+    QStringList parts;
+    if (streams & (1 << static_cast<int>(audio::StreamType::Voice))) {
+        parts << tr("talking");
+    }
+    // Never described as talking, so listeners know it is not the person's microphone.
+    if (streams & (1 << static_cast<int>(audio::StreamType::Media))) {
+        parts << tr("playing a file");
+    }
+    if (streams & (1 << static_cast<int>(audio::StreamType::SystemAudio))) {
+        parts << tr("sharing computer audio");
+    }
+    return parts.join(QStringLiteral(", "));
+}
+
+void ChannelTree::applyActivity(QTreeWidgetItem *item, int streams)
 {
     QFont font = item->font(0);
-    font.setBold(talking);
+    font.setBold(streams != 0);
     item->setFont(0, font);
-    item->setData(0, Qt::AccessibleDescriptionRole, talking ? tr("talking") : QString());
-    item->setToolTip(0, talking ? tr("Talking") : QString());
+    const QString text = activityText(streams);
+    item->setData(0, Qt::AccessibleDescriptionRole, text);
+    item->setToolTip(0, text.isEmpty() ? QString() : text.left(1).toUpper() + text.mid(1));
 }
 
 void ChannelTree::selectChannel(quint32 channelId)

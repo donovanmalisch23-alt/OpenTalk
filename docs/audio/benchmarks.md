@@ -3,7 +3,7 @@
 This page records what has been **measured** about OpenTalk's audio path, how it was measured, and what still needs a person with real sound hardware. The tool is `opentalk-audio-bench`; it ships with OpenTalk and is built from `tools/audio-bench`.
 
 ```
-opentalk-audio-bench all               codec, jitter, router and network tests
+opentalk-audio-bench all               codec, processing, jitter, router and network tests
 opentalk-audio-bench device-loopback   round trip through real sound hardware
 ```
 
@@ -26,6 +26,35 @@ A desktop or laptop will usually be faster per core than this machine. Run the t
 | 64 kbit/s | 492 | 48 | 30 | 2.7 % |
 
 **Test signal:** a synthetic speech-like signal (a voice-like fundamental with formants and syllables), at Opus complexity 10. A client encodes one stream and decodes one stream per person talking, so ten people talking at once cost about 0.4 % of a core for decoding.
+
+### Voice processing cost per 20 ms frame (one CPU core)
+
+Measured with `opentalk-audio-bench processing` on the same machine (two runs; the higher figure is shown).
+
+| Processing | Time per frame (µs) | Share of one core |
+|---|---|---|
+| Noise suppression (the default) | 92 | 0.46 % |
+| Noise suppression and automatic gain | 94 | 0.47 % |
+| Noise suppression, automatic gain and echo cancellation | 389 | 1.9 % |
+| Echo canceller alone, 300 ms tail (sharing computer audio on Windows 10) | 277 | 1.4 % |
+| All voice effects (rumble filter, bass, treble, voice pitch) | 245 | 1.2 % |
+
+Everything switched on together costs about 4 % of one core of this machine, on the audio worker thread (never the device callback).
+
+### Voice processing quality (generated signals)
+
+These come from the automated tests (`tst_voice_processing`, `tst_audio_engine`). The signals are generated: speech-like harmonic sounds in syllables, uniform noise, and echoes made by delaying and attenuating the played signal. They are **not** recordings of real rooms.
+
+| What | Result | Test |
+|---|---|---|
+| Steady noise at -35 dBFS | Lowered by at least 12 dB | `steadyNoiseIsSuppressed` |
+| Speech with noise suppression | Level kept within -6 to +3 dB | `speechSurvivesNoiseSuppression` |
+| Quiet speech (-42 dBFS) with automatic gain | Lifted by at least 8 dB | `automaticGainLiftsQuietSpeech` |
+| Echo (40 ms, 40 %) of played speech | Lowered by at least 15 dB | `echoOfThePlayedSoundIsRemoved` |
+| Both people talking | Canceller alone: echo about 13.6 dB lower. Full processing: local voice kept (about -5.6 dB), echo alone lowered by at least 20 dB | `localTalkerIsKeptWhileEchoIsRemoved` |
+| OpenTalk's own sound in whole-device loopback (Windows 10 path) | 32–43 dB lower than played (test requires 20 dB) | `ownSoundIsRemovedWhenItCannotBeLeftOut` |
+
+**Not measured:** echo cancellation with real speakers and microphones, and the Windows 10 loopback path through Windows' own mixer, which adds resampling and volume changes. Steps 65–74 of the [NVDA test script](../accessibility/nvda-test-script.md) include listening checks.
 
 ### Jitter buffer and loss recovery (simulated network)
 

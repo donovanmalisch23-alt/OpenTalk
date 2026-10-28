@@ -85,6 +85,7 @@ SettingsDialog::SettingsDialog(storage::SettingsStore &settings, const storage::
     addPage(tr("General"), createGeneralPage());
     addPage(tr("Accessibility"), createAccessibilityPage());
     addPage(tr("Audio"), createAudioPage());
+    addPage(tr("Voice Effects and Media"), createEffectsPage());
     addPage(tr("Sounds"), createSoundsPage());
     addPage(tr("Logging and Diagnostics"), createDiagnosticsPage());
 
@@ -371,6 +372,25 @@ QWidget *SettingsDialog::createAudioPage()
     bitrateLabel->setBuddy(bitrate);
     form->addRow(bitrateLabel, bitrate);
 
+    auto *noise = new QCheckBox(tr("Reduce background &noise"));
+    bindCheckBox(noise, kNoiseSuppression);
+    form->addRow(QString(), noise);
+    form->addRow(QString(), helpText(tr("Lowers steady sounds such as fans and hum in what you send. Turn it off "
+                                        "to send music or instruments unchanged."),
+                                     noise));
+    auto *autoGain = new QCheckBox(tr("Even out my voice level &automatically"));
+    bindCheckBox(autoGain, kAutoGain);
+    form->addRow(QString(), autoGain);
+    form->addRow(QString(),
+                 helpText(tr("Makes you louder when you speak quietly or sit far from the microphone."), autoGain));
+    auto *echo = new QCheckBox(tr("&Remove echo when using speakers"));
+    bindCheckBox(echo, kEchoCancellation);
+    form->addRow(QString(), echo);
+    form->addRow(QString(), helpText(tr("Stops other people hearing themselves when your microphone picks up your "
+                                        "speakers. It cannot remove your screen reader's speech; for that, use "
+                                        "headphones or push-to-talk. Works best with background noise reduction on."),
+                                     echo));
+
     auto *udp = new QCheckBox(tr("Use the faster &UDP connection for voice when possible"));
     bindCheckBox(udp, kUseUdp);
     form->addRow(QString(), udp);
@@ -378,6 +398,84 @@ QWidget *SettingsDialog::createAudioPage()
                                         "Applies from the next connection."),
                                      udp));
     return pageWithHeading(tr("Audio"), form);
+}
+
+QWidget *SettingsDialog::createEffectsPage()
+{
+    using namespace storage::client;
+    auto *form = new QFormLayout;
+    form->addRow(new QLabel(tr("Effects change your voice before it is sent. They are all off unless you choose "
+                               "them.")));
+
+    auto *highPass = new QCheckBox(tr("Remove &rumble (low hum, desk knocks)"));
+    bindCheckBox(highPass, kHighPass);
+    form->addRow(QString(), highPass);
+    form->addRow(QString(), helpText(tr("Cuts sounds below about 100 Hz, which voices do not need."), highPass));
+
+    const auto dbSpin = [this](const QString &key, const QString &name, int minimum, int maximum,
+                               const QString &suffix) {
+        auto *spin = new QSpinBox;
+        spin->setRange(minimum, maximum);
+        spin->setSuffix(suffix);
+        spin->setAccessibleName(name);
+        bindSpinBox(spin, key);
+        return spin;
+    };
+    auto *bass = dbSpin(kBassDb, tr("Bass, in decibels"), -12, 12, tr(" dB"));
+    auto *bassLabel = new QLabel(tr("&Bass:"));
+    bassLabel->setBuddy(bass);
+    form->addRow(bassLabel, bass);
+    auto *treble = dbSpin(kTrebleDb, tr("Treble, in decibels"), -12, 12, tr(" dB"));
+    auto *trebleLabel = new QLabel(tr("&Treble:"));
+    trebleLabel->setBuddy(treble);
+    form->addRow(trebleLabel, treble);
+    form->addRow(QString(), helpText(tr("0 dB leaves your voice unchanged. More treble can make speech clearer; "
+                                        "less bass can reduce boominess."),
+                                     treble));
+    auto *pitch = dbSpin(kPitchSemitones, tr("Voice pitch, in semitones"), -12, 12, tr(" semitones"));
+    auto *pitchLabel = new QLabel(tr("Voice &pitch:"));
+    pitchLabel->setBuddy(pitch);
+    form->addRow(pitchLabel, pitch);
+    form->addRow(QString(), helpText(tr("A voice changer: positive values make your voice higher, negative values "
+                                        "lower; 12 is a whole octave. It adds a little delay and roughness."),
+                                     pitch));
+
+    auto *mediaQuality = new QComboBox;
+    mediaQuality->setAccessibleName(tr("Quality of files and computer audio you stream"));
+    for (const auto &[kbps, text] :
+         {std::pair{32, tr("Low (32 kbit/s)")}, std::pair{48, tr("Medium (48 kbit/s)")},
+          std::pair{64, tr("Good (64 kbit/s): recommended")}, std::pair{96, tr("High (96 kbit/s)")},
+          std::pair{128, tr("Maximum (128 kbit/s)")}}) {
+        mediaQuality->addItem(text, kbps);
+    }
+    const int storedMediaBitrate = m_settings.value(kMediaBitrate).toInt();
+    if (mediaQuality->findData(storedMediaBitrate) < 0) {
+        mediaQuality->addItem(tr("Custom (%1 kbit/s)").arg(storedMediaBitrate), storedMediaBitrate);
+    }
+    bindComboData(mediaQuality, kMediaBitrate);
+    auto *mediaQualityLabel = new QLabel(tr("Streaming &quality:"));
+    mediaQualityLabel->setBuddy(mediaQuality);
+    form->addRow(mediaQualityLabel, mediaQuality);
+    form->addRow(QString(), helpText(tr("For files and computer audio you play into the channel. The server may "
+                                        "set a lower limit."),
+                                     mediaQuality));
+    auto *mediaVolume = dbSpin(kMediaVolume, tr("Streaming volume, in percent"), 0, 200, tr(" %"));
+    mediaVolume->setSingleStep(5);
+    auto *mediaVolumeLabel = new QLabel(tr("Streaming &volume:"));
+    mediaVolumeLabel->setBuddy(mediaVolume);
+    form->addRow(mediaVolumeLabel, mediaVolume);
+    auto *monitor = new QCheckBox(tr("&Hear files I stream"));
+    bindCheckBox(monitor, kMediaMonitor);
+    form->addRow(QString(), monitor);
+    auto *muteMedia = new QCheckBox(tr("&Mute files other people stream"));
+    bindCheckBox(muteMedia, kMuteIncomingMedia);
+    form->addRow(QString(), muteMedia);
+    auto *muteSystem = new QCheckBox(tr("Mute &computer audio other people share"));
+    bindCheckBox(muteSystem, kMuteIncomingSystemAudio);
+    form->addRow(QString(), muteSystem);
+    form->addRow(QString(),
+                 helpText(tr("Voices are never muted by these; use a person's volume for that."), muteSystem));
+    return pageWithHeading(tr("Voice Effects and Media"), form);
 }
 
 QWidget *SettingsDialog::createSoundsPage()

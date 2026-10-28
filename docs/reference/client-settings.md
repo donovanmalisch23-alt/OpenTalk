@@ -28,6 +28,19 @@ Only values that have been set are stored, and missing keys use their defaults. 
 | `audio/voiceActivationLevel` | int | `-45` | -80–0 (dBFS) | Settings → Audio | Microphone level that starts transmission in voice activation mode. |
 | `audio/bitrateKbps` | int | `32` | 8–128 | Settings → Audio → Voice quality | Opus bit rate; capped by the server's limit. |
 | `audio/useUdp` | bool | `true` | | Settings → Audio | Use encrypted UDP for voice when it works (otherwise voice uses the main connection). Applies from the next connection. |
+| `audio/noiseSuppression` | bool | `true` | | Settings → Audio → Reduce background noise | Lowers steady noise in what you send (speexdsp). |
+| `audio/autoGain` | bool | `false` | | Settings → Audio → Even out my voice level automatically | Automatic gain control on what you send. |
+| `audio/echoCancellation` | bool | `false` | | Settings → Audio → Remove echo when using speakers | Removes what OpenTalk plays from what the microphone picks up. |
+| `audio/effects/highPass` | bool | `false` | | Settings → Voice Effects and Media → Remove rumble | 100 Hz high-pass filter on what you send. |
+| `audio/effects/bassDb` | int | `0` | -12–12 (dB) | Settings → Voice Effects and Media → Bass | Low-shelf filter at 250 Hz on what you send. |
+| `audio/effects/trebleDb` | int | `0` | -12–12 (dB) | Settings → Voice Effects and Media → Treble | High-shelf filter at 3.5 kHz on what you send. |
+| `audio/effects/pitchSemitones` | int | `0` | -12–12 | Settings → Voice Effects and Media → Voice pitch | Voice changer; 0 = off. Adds about 40 ms of delay. |
+| `audio/media/bitrateKbps` | int | `64` | 16–128 | Settings → Voice Effects and Media → Streaming quality | Opus bit rate for files and computer audio you stream; capped by the server's limit. |
+| `audio/media/volume` | int | `100` | 0–200 (percent) | Settings → Voice Effects and Media → Streaming volume | Volume of files and computer audio you stream. |
+| `audio/media/monitor` | bool | `true` | | Settings → Voice Effects and Media → Hear files I stream | Also play a streamed file on your own speakers. |
+| `audio/media/muteIncoming` | bool | `false` | | Settings → Voice Effects and Media; Audio menu | Silence files other people stream. |
+| `audio/media/muteIncomingComputerAudio` | bool | `false` | | Settings → Voice Effects and Media; Audio menu | Silence computer audio other people share. |
+| `media/lastFolder` | string | empty | a folder path | — (remembered) | Where the "stream a file" dialog opens. |
 | `audio/userVolumes` | object of int | `{}` | values 0–400 (percent); keys `"host:port/user name"` | Channel menu → Volume for selected user (Ctrl+Shift+V) | Per-person volume, remembered per server and user name. 100 is not stored. |
 | `sounds/enabled` | bool | `true` | | Settings → Sounds | Play event sounds. |
 | `sounds/volume` | int | `80` | 0–100 (percent) | Settings → Sounds | Event sound volume. |

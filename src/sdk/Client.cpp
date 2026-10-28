@@ -2,6 +2,7 @@
 #include "opentalk/sdk/Client.h"
 
 #include "opentalk/audio/AudioFormat.h"
+#include "opentalk/audio/MediaFile.h"
 #include "opentalk/audio/OpusCodec.h"
 #include "opentalk/client/Connection.h"
 #include "opentalk/security/Tls.h"
@@ -54,6 +55,58 @@ QByteArray AudioEncoder::encode(const QList<float> &frame)
         return {};
     }
     return d->encoder.encode(std::span<const float>(frame.constData(), static_cast<std::size_t>(frame.size())));
+}
+
+class AudioFileReader::Private {
+public:
+    audio::MediaFile file;
+};
+
+AudioFileReader::AudioFileReader()
+    : d(std::make_unique<Private>())
+{
+}
+
+AudioFileReader::~AudioFileReader() = default;
+
+bool AudioFileReader::open(const QString &path, QString *errorMessage)
+{
+    return d->file.open(path, errorMessage);
+}
+
+void AudioFileReader::close()
+{
+    d->file.close();
+}
+
+bool AudioFileReader::isOpen() const
+{
+    return d->file.isOpen();
+}
+
+QList<float> AudioFileReader::readFrame()
+{
+    QList<float> frame(AudioEncoder::kFrameSamples, 0.0f);
+    const std::size_t got = d->file.read(std::span<float>(frame.data(), static_cast<std::size_t>(frame.size())));
+    if (got == 0) {
+        return {};
+    }
+    return frame;
+}
+
+qint64 AudioFileReader::durationMs() const
+{
+    return d->file.durationMs();
+}
+
+qint64 AudioFileReader::positionMs() const
+{
+    return d->file.positionMs();
+}
+
+bool AudioFileReader::seekMs(qint64 ms)
+{
+    return d->file.seekMs(ms);
 }
 
 class AudioDecoder::Private {

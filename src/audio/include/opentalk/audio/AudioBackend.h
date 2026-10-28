@@ -54,6 +54,8 @@ public:
         return false;
     }
     virtual void stopLoopback() {}
+    /// True once the loopback capture stopped by itself (for example its device went away).
+    virtual bool hasLoopbackFailed() const { return false; }
 };
 
 /// Creates the backend for real hardware.
@@ -80,6 +82,16 @@ public:
     bool hasFailed() const override;
 
     void setGenerator(std::function<float(qint64)> generator);
+    /// Makes "computer audio" available: `generator` is what other programs play.
+    /// Without `canExcludeOwnProcess` (like Windows 10), the capture also contains what
+    /// this backend played, as real loopback would.
+    void setLoopback(std::function<float(qint64)> generator, bool canExcludeOwnProcess);
+    bool supportsLoopback() const override;
+    bool startLoopback(RingBuffer &ring, bool excludeOwnProcess, QString *errorMessage) override;
+    void stopLoopback() override;
+    bool hasLoopbackFailed() const override;
+    /// Simulates the shared device going away while computer audio is being captured.
+    void simulateLoopbackFailure();
     /// Everything played so far (thread-safe copy).
     QVector<float> recordedOutput() const;
     void clearRecording();

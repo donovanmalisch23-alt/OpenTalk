@@ -1,6 +1,6 @@
 # OpenTalk SDK
 
-**Status: draft (SDK 0.3).** It is implemented and covered by tests through two examples run against a real server: `opentalk-ping` (`tst_server_process`) and `opentalk-greeter-bot` (`tst_examples`). It can log in (account or guest), list channels and users (with their role, mutes and whether they are bots), join channels, send and receive channel, private and server-wide messages, send and receive audio, reconnect automatically, and measure round-trip time.
+**Status: draft (SDK 0.4).** It is implemented and covered by tests through two examples run against a real server: `opentalk-ping` (`tst_server_process`) and `opentalk-greeter-bot` (`tst_examples`). It can log in (account or guest), list channels and users (with their role, mutes and whether they are bots), join channels, send and receive channel, private and server-wide messages, send and receive audio, play audio files into a channel, reconnect automatically, and measure round-trip time.
 
 The SDK is the supported way for bots, tools and other programs to talk to OpenTalk servers. The OpenTalk desktop application is built on the same internal libraries.
 
@@ -33,7 +33,7 @@ login.password = readPasswordFromSomewhereSafe();
 client.connectToServer({"chat.example.org", 10350}, {"SHA256:AB:CD:..."}, login);
 ```
 
-Complete programs: [`examples/opentalk-ping`](../../examples/opentalk-ping/main.cpp) (checks a server) and [`examples/greeter-bot`](../../examples/greeter-bot/main.cpp) (a bot that greets people, answers `!help`, `!time`, `!roll`, `!who` and `!beep`, and plays a tone).
+Complete programs: [`examples/opentalk-ping`](../../examples/opentalk-ping/main.cpp) (checks a server) and [`examples/greeter-bot`](../../examples/greeter-bot/main.cpp) (a bot that greets people, answers `!help`, `!time`, `!roll`, `!who` and `!beep`, plays a tone, and with `--media-folder` plays files with `!files`, `!play` and `!stop`).
 
 ## Audio (since 0.3)
 
@@ -50,7 +50,26 @@ QObject::connect(&timer, &QTimer::timeout, [&] {
 QObject::connect(&client, &opentalk::sdk::Client::audioReady, [&] { timer.start(); });
 ```
 
-`sendAudio()` works once `audioReady()` has been emitted (after each login). Received audio arrives through `audioReceived(userId, stream, packet)`. The server forwards audio only to the sender's channel, and only if the sender's role may transmit there.
+`sendAudio()` works once `audioReady()` has been emitted (after each login). Received audio arrives through `audioReceived(userId, stream, packet)`. The server forwards audio only to the sender's channel, and only if the sender's role may transmit there: `Voice` needs the "voice.transmit" permission, `Media` and `SystemAudio` need "media.transmit" (registered users have both by default; guests only voice).
+
+**Use the right stream.** Listeners are told "playing a file" or "sharing computer audio" for `Media` and `SystemAudio`, and "talking" only for `Voice`. Send music and recordings as `Media`, never as `Voice`.
+
+### Playing files (since 0.4)
+
+`AudioFileReader` reads WAV, FLAC and MP3 files a frame at a time, already converted to 48 kHz mono:
+
+```cpp
+opentalk::sdk::AudioFileReader file;
+QString error;
+if (!file.open("music/song.flac", &error)) { /* not found, or not a WAV, FLAC or MP3 file */ }
+QObject::connect(&timer, &QTimer::timeout, [&] {
+    const QList<float> frame = file.readFrame(); // empty when the file has ended
+    if (frame.isEmpty()) { timer.stop(); return; }
+    client.sendAudio(encoder.encode(frame), opentalk::sdk::AudioStream::Media);
+});
+```
+
+`durationMs()`, `positionMs()` and `seekMs()` allow a player with progress and skipping. Only open files your bot chose itself, or names checked against a list: the example bot plays only names it found in its own folder.
 
 ## Bots
 

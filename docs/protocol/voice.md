@@ -24,7 +24,8 @@ Voice therefore always works when the TLS connection works; UDP only makes it fa
 
 - **Codec:** Opus, 48 kHz, mono, 20 ms per packet, with in-band forward error correction.
 - **Packet size:** 1 to 1275 bytes of Opus data.
-- **Streams:** one sequence-numbered stream per user and stream type: 0 voice, 1 media file, 2 shared computer audio. Sequence numbers are 16-bit and wrap around.
+- **Streams:** one sequence-numbered stream per user and stream type: 0 voice, 1 media file, 2 shared computer audio. Sequence numbers are 16-bit and wrap around. A user may send several types at once (for example talking over a file).
+- **Labelling:** clients must present types 1 and 2 as "playing a file" and "sharing computer audio", never as the person talking, so listeners know it is not their microphone. Media and computer audio are encoded as Opus music (the desktop app defaults to 64 kbit/s).
 - **Bit rate:** clients cap their encoders to the bit rate in AudioSetup (default 128 kbit/s).
 
 ## UDP datagram
@@ -67,10 +68,11 @@ AudioData frames have their own rate limit (sustained 200 per second, burst 400)
 - **Per-session audio budget:** 200 packets per second sustained, burst 400, across UDP and tunnel. This covers three simultaneous 20 ms streams with margin; excess is dropped and counted.
 - **Slow receivers:** a client whose TLS connection has more than 256 KiB waiting to be sent gets no tunnelled audio until it catches up, so it cannot build up delay or server memory.
 - **Unauthenticated datagrams** cost the server one hash lookup and, at most, one failed decryption.
-- **Who hears what:** recipients are decided by the server (currently: other users in the same channel). Phase 5 adds permission checks, such as who may speak in a channel.
+- **Who hears what:** recipients are decided by the server: the other users in the sender's channel, if the sender may transmit there and is not voice-muted. Voice (type 0) needs the `voice.transmit` capability; media and computer audio (types 1 and 2) need `media.transmit`, which a channel or role can withhold separately. Audio that is not allowed is dropped silently.
 
 ## Client playback (informative)
 
 - **Jitter buffer:** each incoming stream has its own adaptive buffer. It starts with 2 packets of delay and adapts between 2 and 10 packets based on measured jitter.
 - **Lost packets:** recovered from the next packet's forward error correction when it has arrived, otherwise concealed by Opus.
 - **End of a stream:** detected after 3 consecutive missing packets. The talking indicator turns off and the stream's buffers are released after 30 seconds of silence.
+- **Listener choices:** the desktop app can mute types 1 and 2 from everyone without muting voice.

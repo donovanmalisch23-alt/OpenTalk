@@ -18,18 +18,24 @@ add_library(opentalk_audio STATIC
     include/opentalk/audio/AudioFormat.h
     include/opentalk/audio/Dsp.h
     include/opentalk/audio/JitterBuffer.h
+    include/opentalk/audio/MediaFile.h
     include/opentalk/audio/OpusCodec.h
     include/opentalk/audio/RingBuffer.h
     include/opentalk/audio/Sounds.h
+    include/opentalk/audio/VoiceEffects.h
+    include/opentalk/audio/VoiceProcessing.h
     AudioEngine.cpp
     Dsp.cpp
     JitterBuffer.cpp
+    MediaFile.cpp
     MiniaudioBackend.cpp
     OpusCodec.cpp
     Sounds.cpp
-    SyntheticAudioBackend.cpp)
+    SyntheticAudioBackend.cpp
+    VoiceEffects.cpp
+    VoiceProcessing.cpp)
 add_library(OpenTalk::Audio ALIAS opentalk_audio)
 target_include_directories(opentalk_audio PUBLIC include)
 target_link_libraries(opentalk_audio
     PUBLIC Qt6::Core
-    PRIVATE OpenTalk::Opus opentalk_miniaudio OpenTalk::CompilerOptions)
+    PRIVATE OpenTalk::Opus OpenTalk::SpeexDsp opentalk_miniaudio OpenTalk::CompilerOptions)

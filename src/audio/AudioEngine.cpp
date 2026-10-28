@@ -3,8 +3,11 @@
 
 #include "opentalk/audio/Dsp.h"
 #include "opentalk/audio/JitterBuffer.h"
+#include "opentalk/audio/MediaFile.h"
 #include "opentalk/audio/OpusCodec.h"
 #include "opentalk/audio/RingBuffer.h"
+#include "opentalk/audio/VoiceEffects.h"
+#include "opentalk/audio/VoiceProcessing.h"
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -13,6 +16,7 @@
 #include <QTimer>
 
 #include <array>
+#include <deque>
 #include <map>
 #include <vector>
 
@@ -23,6 +27,11 @@ constexpr int kTickMs = 5;
 constexpr int kPlaybackTargetFrames = 2; ///< Mixed audio kept ready for the device (40 ms).
 constexpr int kRetryMs = 3000;
 constexpr qint64 kStreamIdleDropMs = 30'000;
+/// A capture gap this long means the microphone stalled; the echo reference is resynchronised.
+constexpr qint64 kCaptureGapMs = 100;
+/// If the worker was held up for longer, a playing file skips ahead instead of sending a burst.
+constexpr qint64 kMediaMaxLagMs = 200;
+constexpr std::size_t kMonitorMaxFrames = 10;
 
 quint64 streamKey(quint32 sender, StreamType type)
 {
@@ -45,11 +54,16 @@ public:
         , m_backend(backend)
         , m_capture(kSampleRate)
         , m_playback(kSampleRate)
+        , m_loopback(kSampleRate)
         , m_encoder(OpusEncoderWrapper::Content::Voice, 32000)
+        , m_mediaEncoder(OpusEncoderWrapper::Content::Music, 64000)
+        , m_systemEncoder(OpusEncoderWrapper::Content::Music, 64000)
     {
         m_frame.resize(kFrameSamples);
         m_mix.resize(kFrameSamples);
         m_decoded.resize(kFrameSamples);
+        m_mediaFrame.resize(kFrameSamples);
+        m_systemFrame.resize(kFrameSamples);
     }
 
     void begin()
@@ -68,8 +82,42 @@ public:
         if (m_timer != nullptr) {
             m_timer->stop();
         }
+        stopSystemAudio();
         m_backend.stop();
         m_engine.m_running = false;
+    }
+
+    bool startSystemAudio(QString *errorMessage, bool *excludesOwnSound)
+    {
+        stopSystemAudio();
+        if (!m_backend.supportsLoopback()) {
+            *errorMessage = QStringLiteral("sharing computer audio is not supported on this system");
+            return false;
+        }
+        m_loopback.clear();
+        QString exclusionError;
+        if (m_backend.startLoopback(m_loopback, true, &exclusionError)) {
+            *excludesOwnSound = true;
+        } else {
+            // Capture everything and take out what OpenTalk itself plays (other people's
+            // voices), which would otherwise go back to them as an echo. The reference is
+            // the exact signal sent to the speakers, so this works far better than it does
+            // for a microphone, but loud passages can still leak through.
+            if (!m_backend.startLoopback(m_loopback, false, errorMessage)) {
+                return false;
+            }
+            m_loopbackCanceller = std::make_unique<EchoCanceller>(300);
+            *excludesOwnSound = false;
+        }
+        m_engine.m_sharingSystemAudio = true;
+        return true;
+    }
+
+    void stopSystemAudio()
+    {
+        m_backend.stopLoopback();
+        m_loopbackCanceller.reset();
+        m_engine.m_sharingSystemAudio = false;
     }
 
     // ------------------------------------------------- state shared with the GUI thread
@@ -82,8 +130,14 @@ public:
     std::vector<EventSound> soundRequests;
     SoundSet sounds;
     bool resetRequested = false;
+    std::unique_ptr<MediaFile> pendingMedia;
+    bool mediaStopRequested = false;
+    qint64 mediaSkipMs = 0;
+    MediaStatus mediaSnapshot;
     std::atomic<bool> transmitAllowed{false};
     std::atomic<bool> pushToTalk{false};
+    std::atomic<bool> mediaPaused{false};
+    std::array<std::atomic<bool>, 3> mutedStreams{}; ///< Indexed by StreamType.
 
 private:
     struct Stream {
@@ -109,6 +163,7 @@ private:
         m_backend.stop();
         m_capture.clear();
         m_playback.clear();
+        m_processor.resync();
         const bool ok = m_backend.start(s.inputDeviceId, s.outputDeviceId, m_capture, m_playback, &error);
         m_engine.m_running = ok;
         if (ok) {
@@ -133,6 +188,7 @@ private:
         std::vector<EventSound> requests;
         QHash<quint32, float> gains;
         bool reopen = false;
+        qint64 skip = 0;
         {
             QMutexLocker lock(&mutex);
             s = settings;
@@ -143,8 +199,24 @@ private:
             if (settingsChanged) {
                 m_encoder.setBitrate(s.bitrate);
                 m_vad.setThreshold(s.voiceActivationThresholdDb);
+                m_processor.setOptions({s.noiseSuppression, -30, s.autoGain, s.echoCancellation});
+                m_effects.setOptions({s.highPass, s.bassDb, s.trebleDb, s.pitchSemitones});
+                m_mediaEncoder.setBitrate(s.mediaBitrate);
+                m_systemEncoder.setBitrate(s.mediaBitrate);
                 settingsChanged = false;
             }
+            if (mediaStopRequested) {
+                m_media.reset();
+                m_monitor.clear();
+                mediaStopRequested = false;
+            }
+            if (pendingMedia) {
+                m_media = std::move(pendingMedia);
+                m_monitor.clear();
+                m_mediaNextMs = now;
+            }
+            skip = mediaSkipMs;
+            mediaSkipMs = 0;
             if (resetRequested) {
                 for (const auto &[key, stream] : m_streams) {
                     if (stream.talking) {
@@ -179,15 +251,33 @@ private:
             }
         }
 
-        processCapture(s);
+        if (skip != 0 && m_media) {
+            m_media->seekMs(m_media->positionMs() + skip);
+            m_monitor.clear();
+        }
+
+        processCapture(s, now);
+        processMedia(s, now);
+        processSystemAudio(s);
         processPlayback(s, gains, now);
     }
 
-    void processCapture(const AudioSettings &s)
+    void processCapture(const AudioSettings &s, qint64 now)
     {
+        if (m_capture.available() >= static_cast<std::size_t>(kFrameSamples)) {
+            if (now - m_lastCaptureMs > kCaptureGapMs) {
+                m_processor.resync();
+            }
+            m_lastCaptureMs = now;
+        }
         while (m_capture.available() >= static_cast<std::size_t>(kFrameSamples)) {
             m_capture.read(m_frame.data(), m_frame.size());
             applyGain(m_frame, s.inputGain);
+            // Always, not only while talking, so the processing stays adapted.
+            m_processor.process(m_frame);
+            if (m_effects.isActive()) {
+                m_effects.process(m_frame);
+            }
             const float level = levelDbfs(m_frame);
             m_engine.m_inputLevel = level;
             const bool voice = m_vad.update(level);
@@ -225,6 +315,95 @@ private:
         }
     }
 
+    void processMedia(const AudioSettings &s, qint64 now)
+    {
+        if (!m_media) {
+            return;
+        }
+        if (mediaPaused.load()) {
+            m_mediaNextMs = now; // carry on from here when resumed, without catching up
+            publishMediaStatus(true);
+            return;
+        }
+        if (now - m_mediaNextMs > kMediaMaxLagMs) {
+            m_mediaNextMs = now;
+        }
+        while (m_mediaNextMs <= now) {
+            m_mediaNextMs += kFrameMs;
+            const std::size_t got = m_media->read(m_mediaFrame);
+            if (got > 0) {
+                std::fill(m_mediaFrame.begin() + static_cast<std::ptrdiff_t>(got), m_mediaFrame.end(), 0.0f);
+                applyGain(m_mediaFrame, s.mediaGain);
+                softClip(m_mediaFrame);
+                if (transmitAllowed.load()) {
+                    const QByteArray packet = m_mediaEncoder.encode(m_mediaFrame);
+                    if (!packet.isEmpty()) {
+                        emit m_engine.packetReady(StreamType::Media, m_mediaSequence++, packet);
+                    }
+                }
+                if (s.mediaMonitor) {
+                    m_monitor.emplace_back(m_mediaFrame);
+                    while (m_monitor.size() > kMonitorMaxFrames) {
+                        m_monitor.pop_front();
+                    }
+                }
+            }
+            if (got < static_cast<std::size_t>(kFrameSamples)) {
+                finishMedia();
+                return;
+            }
+        }
+        publishMediaStatus(false);
+    }
+
+    void publishMediaStatus(bool paused)
+    {
+        QMutexLocker lock(&mutex);
+        if (!pendingMedia && !mediaStopRequested) {
+            mediaSnapshot = {true, paused, m_media->title(), m_media->positionMs(), m_media->durationMs()};
+        }
+    }
+
+    void finishMedia()
+    {
+        const QString title = m_media->title();
+        m_media.reset();
+        {
+            QMutexLocker lock(&mutex);
+            if (!pendingMedia) {
+                mediaSnapshot = {};
+                mediaPaused = false;
+            }
+        }
+        emit m_engine.mediaFinished(title);
+    }
+
+    void processSystemAudio(const AudioSettings &s)
+    {
+        if (!m_engine.m_sharingSystemAudio.load()) {
+            return;
+        }
+        if (m_backend.hasLoopbackFailed()) {
+            stopSystemAudio();
+            emit m_engine.systemAudioStopped(QStringLiteral("the sound device being shared stopped working"));
+            return;
+        }
+        while (m_loopback.available() >= static_cast<std::size_t>(kFrameSamples)) {
+            m_loopback.read(m_systemFrame.data(), m_systemFrame.size());
+            if (m_loopbackCanceller) {
+                m_loopbackCanceller->process(m_systemFrame);
+            }
+            applyGain(m_systemFrame, s.mediaGain);
+            softClip(m_systemFrame);
+            if (transmitAllowed.load()) {
+                const QByteArray packet = m_systemEncoder.encode(m_systemFrame);
+                if (!packet.isEmpty()) {
+                    emit m_engine.packetReady(StreamType::SystemAudio, m_systemSequence++, packet);
+                }
+            }
+        }
+    }
+
     void processPlayback(const AudioSettings &s, const QHash<quint32, float> &gains, qint64 now)
     {
         if (!m_engine.m_running.load()) {
@@ -250,7 +429,8 @@ private:
                     stream.talking = talking;
                     emit m_engine.talkingChanged(sender, type, talking);
                 }
-                if (result != JitterBuffer::Result::Empty && !deafened) {
+                const bool muted = mutedStreams[static_cast<std::size_t>(type) % mutedStreams.size()].load();
+                if (result != JitterBuffer::Result::Empty && !deafened && !muted) {
                     mixInto(m_mix, m_decoded, s.outputGain * gains.value(sender, 1.0f));
                 }
                 if (!talking && now - stream.lastPacketMs > kStreamIdleDropMs) {
@@ -258,6 +438,12 @@ private:
                 } else {
                     ++it;
                 }
+            }
+            if (!m_monitor.empty()) {
+                if (!deafened) {
+                    mixInto(m_mix, m_monitor.front(), s.outputGain);
+                }
+                m_monitor.pop_front();
             }
             for (auto it = m_activeSounds.begin(); it != m_activeSounds.end();) {
                 const qsizetype remaining = it->samples->size() - it->position;
@@ -272,6 +458,11 @@ private:
             if (m_playback.write(m_mix.data(), m_mix.size()) < m_mix.size()) {
                 break;
             }
+            // What the speakers play is the echo cancellers' reference.
+            m_processor.playback(m_mix);
+            if (m_loopbackCanceller) {
+                m_loopbackCanceller->playback(m_mix);
+            }
         }
     }
 
@@ -281,10 +472,24 @@ private:
 public:
     RingBuffer m_capture;
     RingBuffer m_playback;
+    RingBuffer m_loopback;
 
 private:
     OpusEncoderWrapper m_encoder;
+    OpusEncoderWrapper m_mediaEncoder;
+    OpusEncoderWrapper m_systemEncoder;
     VoiceActivityDetector m_vad;
+    VoiceProcessor m_processor;
+    VoiceEffects m_effects;
+    std::unique_ptr<EchoCanceller> m_loopbackCanceller; ///< Only when own sound cannot be excluded.
+    std::unique_ptr<MediaFile> m_media;
+    std::deque<std::vector<float>> m_monitor; ///< Media frames to play locally.
+    std::vector<float> m_mediaFrame;
+    std::vector<float> m_systemFrame;
+    qint64 m_mediaNextMs = 0;
+    qint64 m_lastCaptureMs = 0;
+    quint16 m_mediaSequence = 0;
+    quint16 m_systemSequence = 0;
     std::map<quint64, Stream> m_streams;
     std::vector<ActiveSound> m_activeSounds;
     std::vector<float> m_frame;
@@ -401,6 +606,91 @@ void AudioEngine::playSound(EventSound sound)
 {
     QMutexLocker lock(&m_worker->mutex);
     m_worker->soundRequests.push_back(sound);
+}
+
+bool AudioEngine::startMedia(const QString &path, QString *errorMessage)
+{
+    auto file = std::make_unique<MediaFile>();
+    if (!file->open(path, errorMessage)) {
+        return false;
+    }
+    QMutexLocker lock(&m_worker->mutex);
+    m_worker->mediaSnapshot = {true, false, file->title(), 0, file->durationMs()};
+    m_worker->pendingMedia = std::move(file);
+    m_worker->mediaSkipMs = 0;
+    m_worker->mediaPaused = false;
+    return true;
+}
+
+void AudioEngine::stopMedia()
+{
+    QMutexLocker lock(&m_worker->mutex);
+    m_worker->pendingMedia.reset();
+    m_worker->mediaStopRequested = true;
+    m_worker->mediaSnapshot = {};
+    m_worker->mediaPaused = false;
+}
+
+void AudioEngine::setMediaPaused(bool paused)
+{
+    QMutexLocker lock(&m_worker->mutex);
+    if (m_worker->mediaSnapshot.active) {
+        m_worker->mediaPaused = paused;
+        m_worker->mediaSnapshot.paused = paused;
+    }
+}
+
+void AudioEngine::skipMedia(qint64 deltaMs)
+{
+    QMutexLocker lock(&m_worker->mutex);
+    m_worker->mediaSkipMs += deltaMs;
+}
+
+MediaStatus AudioEngine::mediaStatus() const
+{
+    QMutexLocker lock(&m_worker->mutex);
+    return m_worker->mediaSnapshot;
+}
+
+bool AudioEngine::canShareSystemAudio() const
+{
+    return m_backend->supportsLoopback();
+}
+
+bool AudioEngine::startSystemAudio(QString *errorMessage, bool *excludesOwnSound)
+{
+    bool ok = false;
+    bool excludes = false;
+    QString error;
+    // The loopback device and its echo canceller belong to the worker thread.
+    QMetaObject::invokeMethod(
+        m_worker, [&] { ok = m_worker->startSystemAudio(&error, &excludes); }, Qt::BlockingQueuedConnection);
+    if (errorMessage != nullptr) {
+        *errorMessage = error;
+    }
+    if (excludesOwnSound != nullptr) {
+        *excludesOwnSound = excludes;
+    }
+    return ok;
+}
+
+void AudioEngine::stopSystemAudio()
+{
+    if (m_thread.isRunning()) {
+        QMetaObject::invokeMethod(m_worker, [w = m_worker] { w->stopSystemAudio(); }, Qt::BlockingQueuedConnection);
+    }
+}
+
+void AudioEngine::setIncomingStreamMuted(StreamType type, bool muted)
+{
+    if (type != StreamType::Voice) {
+        m_worker->mutedStreams[static_cast<std::size_t>(type) % m_worker->mutedStreams.size()] = muted;
+    }
+}
+
+bool AudioEngine::isIncomingStreamMuted(StreamType type) const
+{
+    return m_worker->mutedStreams[static_cast<std::size_t>(type) % m_worker->mutedStreams.size()].load();
 }
 
 } // namespace opentalk::audio

@@ -111,3 +111,19 @@ Host a server (steps 19–20) so you are its owner. On a second computer or a se
 | 63 | Alt+P, Manage plugins, select Dice roller, Show log. | "Log of Dice roller, dialog"; the log text can be read line by line. Escape closes it. |
 | 64 | Turn off, then Remove…, Remove everything. | "Dice roller is off.", then "Removed Dice roller." The Plugins menu has only "Manage plugins…" again. |
 
+## Voice processing, files and computer audio (Phase 7)
+
+Two copies of OpenTalk, both logged in to your server as registered users (guests may not stream). Use headphones on at least one of them. Put a WAV, FLAC or MP3 file somewhere easy to find.
+
+| # | Do | Expect |
+|---|---|---|
+| 65 | F4, Ctrl+Tab to Audio. Tab through the new switches. | "Reduce background noise, check box, checked", "Even out my voice level automatically, check box, not checked", "Remove echo when using speakers, check box, not checked", each followed by its help text. |
+| 66 | Ctrl+Tab to "Voice Effects and Media". Tab through it. | Every control is read with its name: Remove rumble, Bass (in decibels), Treble, Voice pitch (in semitones), Streaming quality, Streaming volume, Hear files I stream, Mute files other people stream, Mute computer audio other people share. Set Voice pitch to 5, OK, and talk: the other copy hears a higher voice. Set it back to 0. |
+| 67 | Alt+A. Arrow through the Audio menu. | It reads Talk, Mute microphone, Mute everything I hear, Stream a file into the channel (Ctrl+Shift+F), Pause streaming, Back 10 seconds, Forward 10 seconds, Stop streaming and What is streaming (those five unavailable), Share computer audio (Windows), Mute files and computer audio from others, Audio settings. |
+| 68 | Ctrl+Shift+F, choose the file, Enter. | "Streaming *name*, *m:ss* long." The other copy hears it. With "Announce who starts talking" on, it says "*you* playing a file"; in its channel tree your entry is described as "playing a file", not "talking". |
+| 69 | Ctrl+Shift+K, then Ctrl+Shift+I. | "Paused *name* at *m:ss*." then "Paused *name*, *m:ss* of *m:ss*." The status bar's voice field reads "Paused *name*". Ctrl+Shift+K again resumes. |
+| 70 | Ctrl+Shift+L twice, then Ctrl+Shift+J. | Each press says the new position, for example "0:30 of 3:12". |
+| 71 | On the other copy: Alt+A, "Mute files and computer audio from others". | "Files and computer audio from others muted." The file goes silent there, while your voice is still heard. Choose it again to undo. |
+| 72 | Ctrl+Shift+X. | "Stopped streaming *name*." The other copy's tree no longer describes you as playing a file. |
+| 73 | Windows 11: play something in another program, then Ctrl+Shift+C. | "Sharing computer audio." The other copy hears the program but not its own voice coming back when it talks. Ctrl+Shift+C again: "Stopped sharing computer audio." |
+| 74 | Windows 10: Ctrl+Shift+C. | A warning is read: Windows cannot leave OpenTalk's own sound out, some voices may still be heard, and how to avoid it. Ask the other person whether they hear themselves; record the answer. |

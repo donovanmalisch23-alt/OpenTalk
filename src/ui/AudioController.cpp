@@ -12,6 +12,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <utility>
 
 namespace opentalk::ui {
 
@@ -47,20 +48,24 @@ AudioController::AudioController(storage::SettingsStore &settings, const storage
     connect(m_engine.get(), &audio::AudioEngine::deviceProblem, this, &AudioController::deviceProblem);
     connect(m_engine.get(), &audio::AudioEngine::devicesStarted, this, &AudioController::devicesStarted);
     connect(m_engine.get(), &audio::AudioEngine::talkingChanged, this,
-            [this](quint32 userId, audio::StreamType, bool talking) {
-                int &streams = m_talkingStreams[userId];
-                streams = std::max(0, streams + (talking ? 1 : -1));
-                const bool nowTalking = streams > 0;
-                if (nowTalking != m_talking.contains(userId)) {
-                    if (nowTalking) {
-                        m_talking.insert(userId);
-                    } else {
-                        m_talking.remove(userId);
-                        m_talkingStreams.remove(userId);
-                    }
-                    emit talkingChanged(userId, nowTalking);
+            [this](quint32 userId, audio::StreamType type, bool talking) {
+                const int before = m_activity.value(userId);
+                const int after = talking ? (before | streamBit(type)) : (before & ~streamBit(type));
+                if (after == before) {
+                    return;
+                }
+                if (after == 0) {
+                    m_activity.remove(userId);
+                } else {
+                    m_activity.insert(userId, after);
+                }
+                emit activityChanged(userId, after);
+                if (type == audio::StreamType::Voice) {
+                    emit talkingChanged(userId, talking);
                 }
             });
+    connect(m_engine.get(), &audio::AudioEngine::mediaFinished, this, &AudioController::mediaFinished);
+    connect(m_engine.get(), &audio::AudioEngine::systemAudioStopped, this, &AudioController::systemAudioStopped);
     connect(&m_settings, &storage::SettingsStore::valueChanged, this, [this](const QString &key) {
         if (key.startsWith(QLatin1String("audio/")) || key.startsWith(QLatin1String("sounds/"))) {
             if (key != keys::kUserVolumes) {
@@ -97,7 +102,24 @@ void AudioController::applySettings()
     s.soundsEnabled = m_settings.value(keys::kSoundsEnabled).toBool();
     s.soundGain = static_cast<float>(m_settings.value(keys::kSoundsVolume).toInt()) / 100.0f;
     s.pushToTalkSounds = m_settings.value(keys::kPushToTalkSounds).toBool();
+    s.noiseSuppression = m_settings.value(keys::kNoiseSuppression).toBool();
+    s.autoGain = m_settings.value(keys::kAutoGain).toBool();
+    s.echoCancellation = m_settings.value(keys::kEchoCancellation).toBool();
+    s.highPass = m_settings.value(keys::kHighPass).toBool();
+    s.bassDb = m_settings.value(keys::kBassDb).toInt();
+    s.trebleDb = m_settings.value(keys::kTrebleDb).toInt();
+    s.pitchSemitones = m_settings.value(keys::kPitchSemitones).toInt();
+    int mediaBitrate = m_settings.value(keys::kMediaBitrate).toInt() * 1000;
+    if (const quint32 limit = m_connection.voiceMaxBitrate(); limit > 0) {
+        mediaBitrate = std::min(mediaBitrate, static_cast<int>(limit));
+    }
+    s.mediaBitrate = mediaBitrate;
+    s.mediaGain = static_cast<float>(m_settings.value(keys::kMediaVolume).toInt()) / 100.0f;
+    s.mediaMonitor = m_settings.value(keys::kMediaMonitor).toBool();
     m_engine->setSettings(s);
+    m_engine->setIncomingStreamMuted(audio::StreamType::Media, m_settings.value(keys::kMuteIncomingMedia).toBool());
+    m_engine->setIncomingStreamMuted(audio::StreamType::SystemAudio,
+                                     m_settings.value(keys::kMuteIncomingSystemAudio).toBool());
 
     const QKeySequence key =
         QKeySequence::fromString(m_settings.value(keys::kPushToTalkKey).toString(), QKeySequence::PortableText);
@@ -124,11 +146,17 @@ void AudioController::onConnectionStateChanged(client::ConnectionState state)
         m_engine->setTransmitAllowed(false);
         m_engine->resetStreams();
         m_gainApplied.clear();
-        const QList<quint32> talking = m_talking.values();
-        m_talking.clear();
-        m_talkingStreams.clear();
-        for (quint32 userId : talking) {
-            emit talkingChanged(userId, false);
+        const QHash<quint32, int> activity = std::exchange(m_activity, {});
+        for (auto it = activity.cbegin(); it != activity.cend(); ++it) {
+            emit activityChanged(it.key(), 0);
+            if (it.value() & streamBit(audio::StreamType::Voice)) {
+                emit talkingChanged(it.key(), false);
+            }
+        }
+        if (m_engine->mediaStatus().active || m_engine->isSharingSystemAudio()) {
+            m_engine->stopMedia();
+            m_engine->stopSystemAudio();
+            emit streamingInterrupted();
         }
     }
 }

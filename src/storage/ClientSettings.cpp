@@ -44,6 +44,19 @@ SettingsSchema schema()
     s.add({kVoiceActivationLevel, SettingType::Int, -45, range(-80, 0)});
     s.add({kVoiceBitrate, SettingType::Int, 32, range(8, 128)});
     s.add({kUseUdp, SettingType::Bool, true, {}});
+    s.add({kNoiseSuppression, SettingType::Bool, true, {}});
+    s.add({kAutoGain, SettingType::Bool, false, {}});
+    s.add({kEchoCancellation, SettingType::Bool, false, {}});
+    s.add({kHighPass, SettingType::Bool, false, {}});
+    s.add({kBassDb, SettingType::Int, 0, range(-12, 12)});
+    s.add({kTrebleDb, SettingType::Int, 0, range(-12, 12)});
+    s.add({kPitchSemitones, SettingType::Int, 0, range(-12, 12)});
+    s.add({kMediaBitrate, SettingType::Int, 64, range(16, 128)});
+    s.add({kMediaVolume, SettingType::Int, 100, range(0, 200)});
+    s.add({kMediaMonitor, SettingType::Bool, true, {}});
+    s.add({kMuteIncomingMedia, SettingType::Bool, false, {}});
+    s.add({kMuteIncomingSystemAudio, SettingType::Bool, false, {}});
+    s.add({kMediaFolder, SettingType::String, QString(), shortText});
     s.add({kUserVolumes, SettingType::IntMap, QVariantMap(), [](const QVariant &v) {
                const QVariantMap map = v.toMap();
                return map.size() <= 10000 && std::all_of(map.cbegin(), map.cend(), [](const QVariant &x) {

@@ -88,3 +88,11 @@ target_compile_definitions(tst_voice_session PRIVATE
     OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 add_test(NAME tst_voice_session COMMAND tst_voice_session)
 set_tests_properties(tst_voice_session PROPERTIES TIMEOUT 180)
+
+qt_add_executable(tst_media_ui tst_media_ui.cpp)
+target_link_libraries(tst_media_ui PRIVATE
+    Qt6::Test OpenTalk::Ui OpenTalk::Server OpenTalk::Security OpenTalk::Audio OpenTalk::CompilerOptions)
+target_compile_definitions(tst_media_ui PRIVATE
+    OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+add_test(NAME tst_media_ui COMMAND tst_media_ui)
+set_tests_properties(tst_media_ui PROPERTIES TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

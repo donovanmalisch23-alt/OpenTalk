@@ -44,7 +44,25 @@ public:
     void setDeafened(bool deafened);
     bool isDeafened() const { return m_engine->isDeafened(); }
     bool isTransmitting() const { return m_engine->isTransmitting(); }
-    bool isUserTalking(quint32 userId) const { return m_talking.contains(userId); }
+    /// Whether this user's microphone is heard right now.
+    bool isUserTalking(quint32 userId) const { return userActivity(userId) & streamBit(audio::StreamType::Voice); }
+    /// What is heard from this user right now: a combination of streamBit() values.
+    int userActivity(quint32 userId) const { return m_activity.value(userId); }
+    static constexpr int streamBit(audio::StreamType type) { return 1 << static_cast<int>(type); }
+
+    // Files and computer audio played into the channel.
+    bool startMedia(const QString &path, QString *errorMessage) { return m_engine->startMedia(path, errorMessage); }
+    void stopMedia() { m_engine->stopMedia(); }
+    void setMediaPaused(bool paused) { m_engine->setMediaPaused(paused); }
+    void skipMedia(qint64 deltaMs) { m_engine->skipMedia(deltaMs); }
+    audio::MediaStatus mediaStatus() const { return m_engine->mediaStatus(); }
+    bool canShareSystemAudio() const { return m_engine->canShareSystemAudio(); }
+    bool startSystemAudio(QString *errorMessage, bool *excludesOwnSound)
+    {
+        return m_engine->startSystemAudio(errorMessage, excludesOwnSound);
+    }
+    void stopSystemAudio() { m_engine->stopSystemAudio(); }
+    bool isSharingSystemAudio() const { return m_engine->isSharingSystemAudio(); }
 
     /// Volume for one user in percent (0-400; 100 = unchanged), remembered per server
     /// and user name.
@@ -62,7 +80,16 @@ public:
 
 signals:
     void transmittingChanged(bool transmitting);
+    /// A user's microphone started or stopped being heard.
     void talkingChanged(quint32 userId, bool talking);
+    /// What is heard from a user changed (voice, a file, computer audio); see userActivity().
+    void activityChanged(quint32 userId, int streams);
+    /// A file being streamed reached its end.
+    void mediaFinished(const QString &title);
+    /// Streaming a file or computer audio stopped because the connection closed.
+    void streamingInterrupted();
+    /// Sharing computer audio stopped by itself, for example because the device went away.
+    void systemAudioStopped(const QString &reason);
     void deviceProblem(const QString &message);
     void devicesStarted();
 
@@ -79,8 +106,7 @@ private:
     PushToTalkMonitor *m_pushToTalk = nullptr;
     QString m_loadedPack;
     QSet<quint32> m_gainApplied;
-    QHash<quint32, int> m_talkingStreams; ///< User -> number of streams currently audible.
-    QSet<quint32> m_talking;
+    QHash<quint32, int> m_activity; ///< User -> streamBit() values of the streams being heard.
 };
 
 } // namespace opentalk::ui

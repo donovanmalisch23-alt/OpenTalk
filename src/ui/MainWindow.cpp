@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "opentalk/ui/MainWindow.h"
 
+#include "opentalk/audio/MediaFile.h"
 #include "opentalk/logging/Logging.h"
 #include "opentalk/plugins/PluginHost.h"
 #include "opentalk/plugins/PluginRegistry.h"
@@ -23,6 +24,8 @@
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -84,6 +87,19 @@ QString timestamp(qint64 msSinceEpoch = 0)
     return time.toString(QStringLiteral("HH:mm"));
 }
 
+/// "3:07", or "1:02:03" for an hour or more.
+QString formatDuration(qint64 ms)
+{
+    const qint64 seconds = std::max<qint64>(0, ms) / 1000;
+    if (seconds >= 3600) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(seconds / 3600)
+            .arg(seconds / 60 % 60, 2, 10, QLatin1Char('0'))
+            .arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("%1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
+}
+
 } // namespace
 
 MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths &paths,
@@ -118,6 +134,11 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
         this);
     applyAnnouncementSettings();
     connect(&m_settings, &storage::SettingsStore::valueChanged, this, &MainWindow::applyAnnouncementSettings);
+    connect(&m_settings, &storage::SettingsStore::valueChanged, this, [this](const QString &key) {
+        if (key == storage::client::kMuteIncomingMedia || key == storage::client::kMuteIncomingSystemAudio) {
+            updateMediaActions();
+        }
+    });
 
     m_refreshTimer.setSingleShot(true);
     m_refreshTimer.setInterval(0);
@@ -315,11 +336,25 @@ void MainWindow::buildAudio(std::unique_ptr<audio::AudioBackend> backend)
     }
     m_audio = new AudioController(m_settings, m_paths, m_connection, std::move(backend), this);
     connect(m_audio, &AudioController::transmittingChanged, this, &MainWindow::updateVoiceStatus);
-    connect(m_audio, &AudioController::talkingChanged, this, [this](quint32 userId, bool talking) {
-        m_channelTree->setUserTalking(userId, talking);
-        if (talking && m_settings.value(storage::client::kAnnounceTalking).toBool()) {
-            announce(static_cast<int>(Category::Presence), tr("%1 talking").arg(userName(userId)));
-        }
+    connect(m_audio, &AudioController::activityChanged, this, &MainWindow::onUserActivityChanged);
+    connect(m_audio, &AudioController::mediaFinished, this, [this](const QString &title) {
+        const QString text = tr("Finished streaming %1.").arg(title);
+        appendHistory(text);
+        setStatusText(text);
+        updateVoiceStatus();
+        updateMediaActions();
+    });
+    connect(m_audio, &AudioController::systemAudioStopped, this, [this](const QString &reason) {
+        const QString text = tr("Sharing computer audio stopped: %1.").arg(reason);
+        appendHistory(text);
+        setStatusText(text);
+        updateVoiceStatus();
+        updateMediaActions();
+    });
+    connect(m_audio, &AudioController::streamingInterrupted, this, [this] {
+        appendHistory(tr("Streaming stopped because the connection closed."));
+        updateVoiceStatus();
+        updateMediaActions();
     });
     connect(m_audio, &AudioController::deviceProblem, this, [this](const QString &message) {
         if (message == m_lastDeviceProblem) {
@@ -354,6 +389,160 @@ void MainWindow::buildAudio(std::unique_ptr<audio::AudioBackend> backend)
     updateVoiceStatus();
 }
 
+void MainWindow::onUserActivityChanged(quint32 userId, int streams)
+{
+    const int started = streams & ~m_channelTree->userActivity(userId);
+    m_channelTree->setUserActivity(userId, streams);
+    if (started != 0 && m_settings.value(storage::client::kAnnounceTalking).toBool()) {
+        announce(static_cast<int>(Category::Presence),
+                 tr("%1 %2").arg(userName(userId), ChannelTree::activityText(started)));
+    }
+}
+
+void MainWindow::streamFile()
+{
+    using storage::client::kMediaFolder;
+    const QString path = m_mediaFileChooser ? m_mediaFileChooser()
+                                            : QFileDialog::getOpenFileName(this, tr("Stream a File into the Channel"),
+                                                                           m_settings.value(kMediaFolder).toString(),
+                                                                           audio::MediaFile::fileFilter());
+    if (path.isEmpty()) {
+        return;
+    }
+    m_settings.setValue(kMediaFolder, QFileInfo(path).absolutePath());
+    QString error;
+    if (!m_audio->startMedia(path, &error)) {
+        reportError(tr("Cannot stream the file"),
+                    tr("%1 cannot be streamed: %2.").arg(QFileInfo(path).fileName(), error));
+        return;
+    }
+    const audio::MediaStatus status = m_audio->mediaStatus();
+    QString text = tr("Streaming %1").arg(status.title);
+    if (status.durationMs >= 0) {
+        text = tr("Streaming %1, %2 long").arg(status.title, formatDuration(status.durationMs));
+    }
+    appendHistory(text + QLatin1Char('.'));
+    setStatusText(text + QLatin1Char('.'));
+    if (!m_connection.serverState().can(Capability::MediaTransmit)) {
+        appendHistory(tr("You may stream only in some channels. If nobody hears it, this channel does not allow it."));
+    }
+    updateVoiceStatus();
+    updateMediaActions();
+}
+
+void MainWindow::toggleMediaPaused()
+{
+    const audio::MediaStatus status = m_audio->mediaStatus();
+    if (!status.active) {
+        return;
+    }
+    m_audio->setMediaPaused(!status.paused);
+    setStatusText(status.paused ? tr("Streaming %1 again.").arg(status.title)
+                                : tr("Paused %1 at %2.").arg(status.title, formatDuration(status.positionMs)));
+    updateVoiceStatus();
+    updateMediaActions();
+}
+
+void MainWindow::skipMedia(qint64 deltaMs)
+{
+    const audio::MediaStatus status = m_audio->mediaStatus();
+    if (!status.active) {
+        return;
+    }
+    m_audio->skipMedia(deltaMs);
+    qint64 target = std::max<qint64>(0, status.positionMs + deltaMs);
+    if (status.durationMs >= 0) {
+        target = std::min(target, status.durationMs);
+    }
+    setStatusText(status.durationMs >= 0 ? tr("%1 of %2").arg(formatDuration(target), formatDuration(status.durationMs))
+                                         : formatDuration(target));
+}
+
+void MainWindow::stopMedia()
+{
+    const audio::MediaStatus status = m_audio->mediaStatus();
+    if (!status.active) {
+        return;
+    }
+    m_audio->stopMedia();
+    const QString text = tr("Stopped streaming %1.").arg(status.title);
+    appendHistory(text);
+    setStatusText(text);
+    updateVoiceStatus();
+    updateMediaActions();
+}
+
+void MainWindow::sayMediaStatus()
+{
+    QStringList parts;
+    const audio::MediaStatus status = m_audio->mediaStatus();
+    if (status.active) {
+        QString text = status.paused ? tr("Paused %1").arg(status.title) : tr("Streaming %1").arg(status.title);
+        text += status.durationMs >= 0
+                    ? tr(", %1 of %2").arg(formatDuration(status.positionMs), formatDuration(status.durationMs))
+                    : tr(", %1").arg(formatDuration(status.positionMs));
+        parts << text;
+    }
+    if (m_audio->isSharingSystemAudio()) {
+        parts << tr("Sharing computer audio");
+    }
+    setStatusText(parts.isEmpty() ? tr("Not streaming anything.")
+                                  : parts.join(QStringLiteral(". ")) + QLatin1Char('.'));
+}
+
+void MainWindow::toggleSystemAudioSharing()
+{
+    if (m_audio->isSharingSystemAudio()) {
+        m_audio->stopSystemAudio();
+        appendHistory(tr("Stopped sharing computer audio."));
+        setStatusText(tr("Stopped sharing computer audio."));
+    } else {
+        QString error;
+        bool excludesOwnSound = false;
+        if (!m_audio->startSystemAudio(&error, &excludesOwnSound)) {
+            reportError(tr("Cannot share computer audio"), tr("Computer audio cannot be shared: %1.").arg(error));
+        } else if (excludesOwnSound) {
+            appendHistory(tr("Sharing computer audio. Everything this computer plays is sent to your channel, except "
+                             "OpenTalk itself."));
+            setStatusText(tr("Sharing computer audio."));
+        } else {
+            // The explicit warning the threat model asks for when OpenTalk's own sound
+            // cannot be left out.
+            const QString warning =
+                tr("Sharing computer audio. This version of Windows cannot leave OpenTalk's own sound out, so "
+                   "OpenTalk removes it, but some of other people's voices and your screen reader may still be "
+                   "heard. To avoid that, send OpenTalk's sound to a different device in Settings, Audio (for "
+                   "example headphones), or use Windows 11.");
+            appendHistory(warning);
+            setStatusText(warning);
+        }
+    }
+    updateVoiceStatus();
+    updateMediaActions();
+}
+
+void MainWindow::updateMediaActions()
+{
+    if (m_streamFileAction == nullptr || m_audio == nullptr) {
+        return; // still building the window
+    }
+    const bool connected = m_connection.state() == client::ConnectionState::Connected;
+    const bool allowed = connected && m_connection.serverState().canSomewhere(Capability::MediaTransmit);
+    const audio::MediaStatus status = m_audio->mediaStatus();
+    m_streamFileAction->setEnabled(allowed);
+    m_pauseMediaAction->setEnabled(status.active);
+    m_pauseMediaAction->setText(status.paused ? tr("&Resume streaming") : tr("&Pause streaming"));
+    m_skipBackAction->setEnabled(status.active);
+    m_skipForwardAction->setEnabled(status.active);
+    m_stopMediaAction->setEnabled(status.active);
+    const bool sharing = m_audio->isSharingSystemAudio();
+    m_shareSystemAudioAction->setVisible(m_audio->canShareSystemAudio());
+    m_shareSystemAudioAction->setEnabled(allowed || sharing);
+    m_shareSystemAudioAction->setChecked(sharing);
+    m_muteIncomingMediaAction->setChecked(m_settings.value(storage::client::kMuteIncomingMedia).toBool() &&
+                                          m_settings.value(storage::client::kMuteIncomingSystemAudio).toBool());
+}
+
 void MainWindow::playSound(audio::EventSound sound)
 {
     if (m_audio != nullptr) {
@@ -378,6 +567,13 @@ void MainWindow::updateVoiceStatus()
         parts << tr("Talking");
     } else if (m_audio->isTransmitLatched()) {
         parts << tr("Talk on");
+    }
+    const audio::MediaStatus media = m_audio->mediaStatus();
+    if (media.active) {
+        parts << (media.paused ? tr("Paused %1").arg(media.title) : tr("Streaming %1").arg(media.title));
+    }
+    if (m_audio->isSharingSystemAudio()) {
+        parts << tr("Sharing computer audio");
     }
     m_voiceLabel->setText(parts.join(QStringLiteral(", ")));
     if (m_transmitAction != nullptr) {
@@ -583,6 +779,7 @@ void MainWindow::buildMenus()
     m_userList->addActions(userActions);
 
     QMenu *audioMenu = menuBar()->addMenu(tr("&Audio"));
+    connect(audioMenu, &QMenu::aboutToShow, this, &MainWindow::updateMediaActions);
     m_transmitAction =
         audioMenu->addAction(tr("&Talk (stay on until pressed again)"), this, &MainWindow::toggleTransmit);
     m_transmitAction->setCheckable(true);
@@ -593,6 +790,42 @@ void MainWindow::buildMenus()
     m_deafenAction = audioMenu->addAction(tr("Mute &everything I hear"), this, &MainWindow::toggleDeafen);
     m_deafenAction->setCheckable(true);
     m_deafenAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M));
+    audioMenu->addSeparator();
+    m_streamFileAction = audioMenu->addAction(tr("Stream a &file into the channel..."), this, &MainWindow::streamFile);
+    m_streamFileAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
+    m_pauseMediaAction = audioMenu->addAction(tr("&Pause streaming"), this, &MainWindow::toggleMediaPaused);
+    m_pauseMediaAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K));
+    m_skipBackAction = audioMenu->addAction(tr("&Back 10 seconds"), this, [this] { skipMedia(-10'000); });
+    m_skipBackAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_J));
+    m_skipForwardAction = audioMenu->addAction(tr("For&ward 10 seconds"), this, [this] { skipMedia(10'000); });
+    m_skipForwardAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    m_stopMediaAction = audioMenu->addAction(tr("St&op streaming"), this, &MainWindow::stopMedia);
+    m_stopMediaAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_X));
+    m_mediaStatusAction = audioMenu->addAction(tr("What is stream&ing?"), this, &MainWindow::sayMediaStatus);
+    m_mediaStatusAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
+    m_shareSystemAudioAction =
+        audioMenu->addAction(tr("Share &computer audio"), this, &MainWindow::toggleSystemAudioSharing);
+    m_shareSystemAudioAction->setCheckable(true);
+    m_shareSystemAudioAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+    m_muteIncomingMediaAction = audioMenu->addAction(tr("M&ute files and computer audio from others"), this, [this] {
+        const bool mute = m_muteIncomingMediaAction->isChecked();
+        m_settings.setValue(storage::client::kMuteIncomingMedia, mute);
+        m_settings.setValue(storage::client::kMuteIncomingSystemAudio, mute);
+        setStatusText(mute ? tr("Files and computer audio from others muted.")
+                           : tr("Files and computer audio from others on."));
+    });
+    m_muteIncomingMediaAction->setCheckable(true);
+    for (const auto &[action, name] :
+         QList<std::pair<QAction *, const char *>>{{m_streamFileAction, "streamFileAction"},
+                                                   {m_pauseMediaAction, "pauseMediaAction"},
+                                                   {m_skipBackAction, "skipBackAction"},
+                                                   {m_skipForwardAction, "skipForwardAction"},
+                                                   {m_stopMediaAction, "stopMediaAction"},
+                                                   {m_mediaStatusAction, "mediaStatusAction"},
+                                                   {m_shareSystemAudioAction, "shareSystemAudioAction"},
+                                                   {m_muteIncomingMediaAction, "muteIncomingMediaAction"}}) {
+        action->setObjectName(QLatin1String(name));
+    }
     audioMenu->addSeparator();
     audioMenu->addAction(tr("Audio &settings..."), this, &MainWindow::openAudioSettings);
 
@@ -1080,6 +1313,7 @@ void MainWindow::updateActions()
     offer(m_adminAction, state.canModerate(), true);
     m_reportAction->setEnabled(otherUser);
     m_mySanctionsAction->setEnabled(connected);
+    updateMediaActions();
 }
 
 // ------------------------------------------------------------------- requests

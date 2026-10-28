@@ -12,6 +12,7 @@ One row per third-party component or asset that is **used by or shipped with** O
 | Qt SQL | Same as Qt | The Qt Company | Same as Qt | Yes / Yes | As for Qt | Yes | — |
 | Qt Test | Same as Qt | The Qt Company | Same as Qt | Yes / Not shipped | — | Yes | Test-only. |
 | Opus (libopus) | Windows: 1.6.1 from vcpkg (pinned); Linux: system 1.3 or later | Xiph.Org Foundation and contributors, opus-codec.org | BSD-3-Clause | Yes / Yes (Windows package) | Ship the licence text and copyright notice | Yes | Licence file not yet in the zip (Phase 8). Opus has royalty-free patent licences from the IETF contributors; see opus-codec.org/license. |
+| speexdsp | Windows: 1.2.1 (port version 1) from vcpkg (pinned); Linux: system 1.2.x | Xiph.Org Foundation and contributors, speex.org | BSD-3-Clause | Yes / Yes (Windows package) | Ship the licence text and copyright notice | Yes | Licence file not yet in the zip (Phase 8). Used for noise suppression, automatic gain and echo cancellation ([ADR 0010](../architecture/decisions/0010-voice-processing-media-and-system-audio.md)). |
 | miniaudio | 0.11.25, vendored in `third_party/miniaudio` (single header, unmodified; SHA-256 `ac7af4de748b7e26b777f37e01cee313a308a7296a3eb080e2906b320cc55c89`) | David Reid, miniaud.io | Unlicense OR MIT-0 | Yes / Yes | None required; the licence file is kept beside the header | Yes | — |
 | GNU GPL v3 text (`LICENSE`) | 29 June 2007 | Free Software Foundation | Verbatim copying permitted | No modification / Yes | — | n/a | — |
 

@@ -349,6 +349,8 @@ private slots:
         audio::AudioSettings settings;
         settings.mode = audio::TransmitMode::Continuous;
         settings.soundsEnabled = false;
+        // Test tones are steady, which noise suppression is designed to remove.
+        settings.noiseSuppression = false;
         speakerEngine.setSettings(settings);
         connect(&speakerEngine, &audio::AudioEngine::packetReady, &speaker,
                 [&](audio::StreamType type, quint16 sequence, const QByteArray &opus) {

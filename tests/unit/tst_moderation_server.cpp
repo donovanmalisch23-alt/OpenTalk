@@ -351,6 +351,38 @@ private slots:
         QVERIFY(h->last<ListResult>(1)->reports.isEmpty());
     }
 
+    void streamingFilesNeedsItsOwnPermission()
+    {
+        auto h = moderatedServer();
+        QVERIFY(h->login(1, QStringLiteral("admin")));
+        QVERIFY(h->login(2, QStringLiteral("alice")));
+        QVERIFY(h->login(3, QStringLiteral("Visitor"), true));
+        using protocol::AudioStream;
+        // Registered users may stream files and computer audio; guests may only talk.
+        QCOMPARE(h->core->voiceRecipients(2, AudioStream::Media).size(), 2);
+        QCOMPARE(h->core->voiceRecipients(2, AudioStream::SystemAudio).size(), 2);
+        QCOMPARE(h->core->voiceRecipients(3, AudioStream::Voice).size(), 2);
+        QVERIFY(h->core->voiceRecipients(3, AudioStream::Media).isEmpty());
+        QVERIFY(h->core->voiceRecipients(3, AudioStream::SystemAudio).isEmpty());
+        // A channel can forbid streaming without forbidding talking.
+        RuleInfo noMedia;
+        noMedia.channelId = kRootChannelId;
+        noMedia.roleId = 1;
+        noMedia.capability = static_cast<quint16>(moderation::Capability::MediaTransmit);
+        noMedia.allow = false;
+        h->send(1, AddRule{1, noMedia});
+        QCOMPARE(h->answer(1, 1), std::optional<ErrorCode>());
+        QVERIFY(h->core->voiceRecipients(2, AudioStream::Media).isEmpty());
+        QVERIFY(h->core->voiceRecipients(2, AudioStream::SystemAudio).isEmpty());
+        QCOMPARE(h->core->voiceRecipients(2, AudioStream::Voice).size(), 2);
+        // A voice mute silences streams too.
+        QVERIFY(h->login(4, QStringLiteral("mod")));
+        h->send(4, sanctionOn(3, 2, SanctionType::Mute, 600));
+        QCOMPARE(h->answer(4, 3), std::optional<ErrorCode>());
+        QVERIFY(h->core->voiceRecipients(2, AudioStream::Voice).isEmpty());
+        QVERIFY(h->core->voiceRecipients(2, AudioStream::Media).isEmpty());
+    }
+
     void channelRulesAndChannelModerators()
     {
         auto h = moderatedServer();

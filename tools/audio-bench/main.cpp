@@ -2,6 +2,7 @@
 // opentalk-audio-bench: measurements behind docs/audio/benchmarks.md.
 //
 //   opentalk-audio-bench codec            Opus CPU cost per 20 ms frame
+//   opentalk-audio-bench processing       noise suppression, echo cancellation and effects cost
 //   opentalk-audio-bench jitter           jitter buffer delay and loss recovery (simulated network)
 //   opentalk-audio-bench network          latency through a real server on this computer
 //   opentalk-audio-bench router           server CPU cost to forward one packet
@@ -16,6 +17,8 @@
 #include "opentalk/audio/JitterBuffer.h"
 #include "opentalk/audio/OpusCodec.h"
 #include "opentalk/audio/RingBuffer.h"
+#include "opentalk/audio/VoiceEffects.h"
+#include "opentalk/audio/VoiceProcessing.h"
 #include "opentalk/client/Connection.h"
 #include "opentalk/protocol/VoicePacket.h"
 #include "opentalk/security/CertificateGenerator.h"
@@ -135,6 +138,68 @@ void benchCodec()
                 .arg(fixed(decodeUs))
                 .arg(fixed(concealUs))
                 .arg(fixed(share, 2)));
+    }
+    out(QString());
+}
+
+// -------------------------------------------------------------------- processing
+
+void benchProcessing()
+{
+    out(QStringLiteral("## Voice processing cost per 20 ms frame (one CPU core)\n"));
+    out(QStringLiteral("| Processing | Time per frame (µs) | Share of one core |"));
+    out(QStringLiteral("|---|---|---|"));
+    const int frames = 2500; // 50 seconds of audio
+    const std::vector<float> microphone = speechLike(frames, 3);
+    const std::vector<float> played = speechLike(frames, 4);
+    const auto row = [](const QString &name, double us) {
+        out(QStringLiteral("| %1 | %2 | %3 % |")
+                .arg(name, fixed(us), fixed(us / (audio::kFrameMs * 1000.0) * 100.0, 2)));
+    };
+    const auto timeProcessor = [&](const audio::VoiceProcessor::Options &options) {
+        audio::VoiceProcessor processor;
+        processor.setOptions(options);
+        std::vector<float> frame(kFrameSamples);
+        QElapsedTimer timer;
+        timer.start();
+        for (int f = 0; f < frames; ++f) {
+            const std::size_t at = static_cast<std::size_t>(f) * kFrameSamples;
+            processor.playback(std::span<const float>(played.data() + at, kFrameSamples));
+            std::copy_n(microphone.data() + at, kFrameSamples, frame.data());
+            processor.process(frame);
+        }
+        return static_cast<double>(timer.nsecsElapsed()) / 1000.0 / frames;
+    };
+    row(QStringLiteral("Noise suppression (default)"), timeProcessor({true, -30, false, false}));
+    row(QStringLiteral("Noise suppression and automatic gain"), timeProcessor({true, -30, true, false}));
+    row(QStringLiteral("Noise suppression, automatic gain and echo cancellation"),
+        timeProcessor({true, -30, true, true}));
+    {
+        audio::EchoCanceller canceller(300); // as used for whole-device loopback
+        std::vector<float> frame(kFrameSamples);
+        QElapsedTimer timer;
+        timer.start();
+        for (int f = 0; f < frames; ++f) {
+            const std::size_t at = static_cast<std::size_t>(f) * kFrameSamples;
+            canceller.playback(std::span<const float>(played.data() + at, kFrameSamples));
+            std::copy_n(microphone.data() + at, kFrameSamples, frame.data());
+            canceller.process(frame);
+        }
+        row(QStringLiteral("Echo canceller alone, 300 ms (computer audio on Windows 10)"),
+            static_cast<double>(timer.nsecsElapsed()) / 1000.0 / frames);
+    }
+    {
+        audio::VoiceEffects effects;
+        effects.setOptions({true, 6, 3, 4});
+        std::vector<float> frame(kFrameSamples);
+        QElapsedTimer timer;
+        timer.start();
+        for (int f = 0; f < frames; ++f) {
+            std::copy_n(microphone.data() + static_cast<std::size_t>(f) * kFrameSamples, kFrameSamples, frame.data());
+            effects.process(frame);
+        }
+        row(QStringLiteral("All voice effects (rumble filter, bass, treble, pitch)"),
+            static_cast<double>(timer.nsecsElapsed()) / 1000.0 / frames);
     }
     out(QString());
 }
@@ -511,7 +576,7 @@ int main(int argc, char *argv[])
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("test"),
-                                 QStringLiteral("codec, jitter, router, network, device-loopback or all"));
+                                 QStringLiteral("codec, processing, jitter, router, network, device-loopback or all"));
     const QCommandLineOption inputOption(QStringLiteral("input"), QStringLiteral("Input device name."),
                                          QStringLiteral("name"));
     const QCommandLineOption outputOption(QStringLiteral("output"), QStringLiteral("Output device name."),
@@ -531,6 +596,9 @@ int main(int argc, char *argv[])
     bool ok = true;
     if (test == QLatin1String("codec") || test == QLatin1String("all")) {
         benchCodec();
+    }
+    if (test == QLatin1String("processing") || test == QLatin1String("all")) {
+        benchProcessing();
     }
     if (test == QLatin1String("jitter") || test == QLatin1String("all")) {
         benchJitter();

@@ -160,7 +160,7 @@ public:
             ma_device_uninit(m_playbackDevice.get());
             m_playbackDevice.reset();
         }
-        if (m_context && !m_loopbackDevice) {
+        if (m_context) {
             ma_context_uninit(m_context.get());
             m_context.reset();
         }
@@ -177,13 +177,14 @@ public:
 #ifdef Q_OS_WIN
         stopLoopback();
         m_loopbackRing = &ring;
-        if (!m_context) {
-            m_context = std::make_unique<ma_context>();
-            if (ma_context_init(nullptr, 0, nullptr, m_context.get()) != MA_SUCCESS) {
-                m_context.reset();
-                setError(errorMessage, QStringLiteral("the sound system could not be opened"));
-                return false;
-            }
+        m_loopbackFailed = false;
+        // Its own context, so reopening the microphone and speakers (which replaces their
+        // context) never pulls it out from under the loopback device.
+        m_loopbackContext = std::make_unique<ma_context>();
+        if (ma_context_init(nullptr, 0, nullptr, m_loopbackContext.get()) != MA_SUCCESS) {
+            m_loopbackContext.reset();
+            setError(errorMessage, QStringLiteral("the sound system could not be opened"));
+            return false;
         }
         ma_device_config config = ma_device_config_init(ma_device_type_loopback);
         config.capture.format = ma_format_f32;
@@ -191,19 +192,26 @@ public:
         config.sampleRate = kSampleRate;
         config.periodSizeInMilliseconds = 10;
         config.dataCallback = &MiniaudioBackend::loopbackCallback;
+        config.notificationCallback = &MiniaudioBackend::loopbackNotificationCallback;
         config.pUserData = this;
         if (excludeOwnProcess) {
             config.wasapi.loopbackProcessID = GetCurrentProcessId();
             config.wasapi.loopbackProcessExclude = MA_TRUE;
         }
         m_loopbackDevice = std::make_unique<ma_device>();
-        if (ma_device_init(m_context.get(), &config, m_loopbackDevice.get()) != MA_SUCCESS ||
-            ma_device_start(m_loopbackDevice.get()) != MA_SUCCESS) {
+        m_stoppingLoopback = false;
+        if (ma_device_init(m_loopbackContext.get(), &config, m_loopbackDevice.get()) != MA_SUCCESS) {
             m_loopbackDevice.reset();
+            stopLoopback();
             setError(errorMessage, excludeOwnProcess
-                                       ? QStringLiteral("sharing computer audio without OpenTalk's own sound needs "
-                                                        "Windows 10 version 2104 (build 20348) or later")
+                                       ? QStringLiteral("leaving OpenTalk's own sound out of shared computer audio "
+                                                        "needs Windows 11")
                                        : QStringLiteral("computer audio could not be captured"));
+            return false;
+        }
+        if (ma_device_start(m_loopbackDevice.get()) != MA_SUCCESS) {
+            stopLoopback();
+            setError(errorMessage, QStringLiteral("computer audio could not be captured"));
             return false;
         }
         return true;
@@ -214,12 +222,19 @@ public:
 
     void stopLoopback() override
     {
+        m_stoppingLoopback = true;
         if (m_loopbackDevice) {
             ma_device_uninit(m_loopbackDevice.get());
             m_loopbackDevice.reset();
         }
+        if (m_loopbackContext) {
+            ma_context_uninit(m_loopbackContext.get());
+            m_loopbackContext.reset();
+        }
         m_loopbackRing = nullptr;
     }
+
+    bool hasLoopbackFailed() const override { return m_loopbackFailed; }
 
 private:
     static void captureCallback(ma_device *device, void *, const void *input, ma_uint32 frames)
@@ -246,6 +261,14 @@ private:
         }
     }
 
+    static void loopbackNotificationCallback(const ma_device_notification *notification)
+    {
+        auto *self = static_cast<MiniaudioBackend *>(notification->pDevice->pUserData);
+        if (notification->type == ma_device_notification_type_stopped && !self->m_stoppingLoopback) {
+            self->m_loopbackFailed = true; // for example the output device it captured went away
+        }
+    }
+
     static void notificationCallback(const ma_device_notification *notification)
     {
         auto *self = static_cast<MiniaudioBackend *>(notification->pDevice->pUserData);
@@ -257,12 +280,15 @@ private:
     std::unique_ptr<ma_context> m_context;
     std::unique_ptr<ma_device> m_captureDevice;
     std::unique_ptr<ma_device> m_playbackDevice;
+    std::unique_ptr<ma_context> m_loopbackContext;
     std::unique_ptr<ma_device> m_loopbackDevice;
     RingBuffer *m_capture = nullptr;
     RingBuffer *m_playback = nullptr;
     RingBuffer *m_loopbackRing = nullptr;
     std::atomic<bool> m_failed{false};
     std::atomic<bool> m_stopping{false};
+    std::atomic<bool> m_stoppingLoopback{false};
+    std::atomic<bool> m_loopbackFailed{false};
 };
 
 } // namespace

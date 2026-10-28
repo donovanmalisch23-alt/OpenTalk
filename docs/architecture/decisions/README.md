@@ -13,3 +13,4 @@ Short records of significant decisions: context, options, decision, consequences
 | [0007](0007-openssl-tls-backend.md) | Qt's OpenSSL TLS backend on every platform | Accepted |
 | [0008](0008-voice-encryption.md) | Voice encryption: XChaCha20-Poly1305 with keys sent over TLS | Accepted |
 | [0009](0009-audio-io-miniaudio.md) | miniaudio for audio devices; Opus for coding | Accepted |
+| [0010](0010-voice-processing-media-and-system-audio.md) | Voice processing (speexdsp), effects, a built-in media player, and computer-audio sharing | Accepted |

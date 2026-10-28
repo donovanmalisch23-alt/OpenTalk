@@ -78,6 +78,7 @@ private:
     QWidget *createGeneralPage();
     QWidget *createAccessibilityPage();
     QWidget *createAudioPage();
+    QWidget *createEffectsPage();
     QWidget *createSoundsPage();
     QWidget *createDiagnosticsPage();
 

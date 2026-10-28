@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ### Added
 
+- Voice processing (Phase 7): noise suppression (on by default), automatic gain and echo cancellation for speakers, using speexdsp 1.2.1 (added to the third-party register).
+- Voice effects: rumble filter, bass, treble and a voice changer (pitch), on a new "Voice Effects and Media" settings page.
+- Playing WAV, FLAC and MP3 files into your channel (Ctrl+Shift+F), with pause (Ctrl+Shift+K), back and forward 10 seconds (Ctrl+Shift+J, Ctrl+Shift+L), stop (Ctrl+Shift+X) and "what is playing" (Ctrl+Shift+I). The sender hears it too unless they turn that off.
+- Sharing computer audio (Ctrl+Shift+C, Windows). On Windows 11 OpenTalk's own sound is left out; on Windows 10 it is removed by echo cancellation and the user is warned.
+- Listeners see "playing a file" or "sharing computer audio" instead of "talking", can have it announced, and can mute files and computer audio from others without muting voices.
+- The "Stream media files and computer audio" permission (`media.transmit`) is enforced separately from voice; guests do not have it by default.
+- SDK 0.4: `AudioFileReader` for bots that play files. The example bot plays files from `--media-folder` with `!files`, `!play` and `!stop`.
+- `opentalk-audio-bench processing` measures the cost of voice processing and effects.
+- ADR 0010 and a virtual audio driver feasibility report (for an owner decision).
 - Plugins (Phase 6): separate programs in any language that talk JSON lines with the app. A consent dialog lists what each may do; permissions are enforced, must be reviewed again when a plugin changes, and misbehaving or crash-looping plugins are turned off. Plugin manager, Plugins menu (Alt+P) and `--no-plugins`.
 - Example plugins: a dice roller in C++ and a "who is here" plugin in Python, included in the portable zip under `examples\plugins`.
 - Bot accounts: `opentalk-server --create-account <name> --bot`, or a check box in Administration. Everyone sees them marked as bots, and the audit log names them as bots. Server database schema 3 (upgraded automatically).

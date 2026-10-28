@@ -32,6 +32,27 @@ struct AudioSettings {
     bool soundsEnabled = true;
     float soundGain = 0.8f;
     bool pushToTalkSounds = true;
+    bool noiseSuppression = true;
+    bool autoGain = false;
+    bool echoCancellation = false; ///< For speakers; not needed with headphones.
+    // Voice effects (VoiceEffects): off unless chosen.
+    bool highPass = false;
+    int bassDb = 0;
+    int trebleDb = 0;
+    int pitchSemitones = 0;
+    // Media files and shared computer audio.
+    int mediaBitrate = 64000;
+    float mediaGain = 1.0f;   ///< Volume of what is streamed (files and computer audio).
+    bool mediaMonitor = true; ///< Also play the file being streamed on this computer.
+};
+
+/// What the media player is doing.
+struct MediaStatus {
+    bool active = false;
+    bool paused = false;
+    QString title;
+    qint64 positionMs = 0;
+    qint64 durationMs = -1; ///< -1 when unknown.
 };
 
 /// Voice in and out, independent of the network.
@@ -83,12 +104,41 @@ public:
     /// Microphone level of the last frame in dBFS (-100 = silence), for meters.
     float inputLevelDb() const { return m_inputLevel.load(); }
 
+    // ------------------------------------------------- media files (StreamType::Media)
+    /// Streams a WAV, FLAC or MP3 file into the channel at its normal speed, replacing
+    /// any file already playing. Packets go out through packetReady while transmitting
+    /// is allowed; the microphone keeps working alongside.
+    bool startMedia(const QString &path, QString *errorMessage);
+    void stopMedia();
+    void setMediaPaused(bool paused);
+    /// Moves the playing file forwards (positive) or backwards.
+    void skipMedia(qint64 deltaMs);
+    MediaStatus mediaStatus() const;
+
+    // ------------------------------------------ computer audio (StreamType::SystemAudio)
+    bool canShareSystemAudio() const;
+    /// Starts sending what the computer plays. It first tries to leave OpenTalk's own
+    /// sound out (Windows 11). Where that is not possible it captures everything and
+    /// removes OpenTalk's own sound with echo cancellation; `excludesOwnSound` tells
+    /// which, so the user can be warned that some of it may come through.
+    bool startSystemAudio(QString *errorMessage, bool *excludesOwnSound = nullptr);
+    void stopSystemAudio();
+    bool isSharingSystemAudio() const { return m_sharingSystemAudio.load(); }
+
+    /// Silences incoming files or computer audio from everyone; voice is not affected.
+    void setIncomingStreamMuted(StreamType type, bool muted);
+    bool isIncomingStreamMuted(StreamType type) const;
+
 signals:
     void packetReady(opentalk::audio::StreamType type, quint16 sequence, const QByteArray &opus);
     void transmittingChanged(bool transmitting);
     void talkingChanged(quint32 userId, opentalk::audio::StreamType type, bool talking);
     void deviceProblem(const QString &message);
     void devicesStarted();
+    /// The file reached its end (not sent for stopMedia()).
+    void mediaFinished(const QString &title);
+    /// Sharing computer audio stopped by itself (not sent for stopSystemAudio()).
+    void systemAudioStopped(const QString &reason);
 
 private:
     class Worker;
@@ -101,6 +151,7 @@ private:
     std::atomic<bool> m_muted{false};
     std::atomic<bool> m_deafened{false};
     std::atomic<float> m_inputLevel{-100.0f};
+    std::atomic<bool> m_sharingSystemAudio{false};
 };
 
 } // namespace opentalk::audio

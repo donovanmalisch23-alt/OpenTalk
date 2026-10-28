@@ -30,4 +30,15 @@ else()
     target_link_libraries(opentalk_opus INTERFACE PkgConfig::OPUS)
 endif()
 
+# speexdsp: noise suppression, automatic gain and echo cancellation (ADR 0010).
+find_path(SPEEXDSP_INCLUDE_DIR speex/speex_preprocess.h)
+find_library(SPEEXDSP_LIBRARY NAMES speexdsp libspeexdsp)
+if(NOT SPEEXDSP_INCLUDE_DIR OR NOT SPEEXDSP_LIBRARY)
+    message(FATAL_ERROR "speexdsp was not found (Windows: vcpkg installs it; Linux: install libspeexdsp-dev)")
+endif()
+add_library(opentalk_speexdsp INTERFACE)
+add_library(OpenTalk::SpeexDsp ALIAS opentalk_speexdsp)
+target_include_directories(opentalk_speexdsp SYSTEM INTERFACE ${SPEEXDSP_INCLUDE_DIR})
+target_link_libraries(opentalk_speexdsp INTERFACE ${SPEEXDSP_LIBRARY})
+
 find_package(Threads REQUIRED)

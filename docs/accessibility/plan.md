@@ -49,6 +49,12 @@ Qt exposes widgets to screen readers through **UI Automation** on Windows. Stand
 | Ctrl+M | Mute or unmute the microphone |
 | Ctrl+Shift+M | Mute or unmute everything you hear |
 | Ctrl+Shift+V | Volume for the selected person |
+| Ctrl+Shift+F | Stream a file into the channel |
+| Ctrl+Shift+K | Pause or resume the file being streamed |
+| Ctrl+Shift+J / Ctrl+Shift+L | Back / forward 10 seconds in that file |
+| Ctrl+Shift+X | Stop streaming |
+| Ctrl+Shift+I | Say what is streaming, and where |
+| Ctrl+Shift+C | Share computer audio on or off (Windows) |
 | Ctrl+Shift+A | Administration (moderators and administrators) |
 | Ctrl+Tab / Ctrl+Shift+Tab, F5 (Administration) | Next / previous tab; reload the tab |
 | Ctrl+Q | Exit |

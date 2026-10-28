@@ -242,6 +242,8 @@ private slots:
         audio::AudioSettings settings;
         settings.mode = audio::TransmitMode::Continuous;
         settings.soundsEnabled = false;
+        // Test tones are steady, which noise suppression is designed to remove.
+        settings.noiseSuppression = false;
         talker.setSettings(settings);
         listener.setSettings(settings);
         QObject::connect(&talker, &audio::AudioEngine::packetReady, &alice.connection,

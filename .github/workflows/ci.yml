@@ -151,7 +151,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev pkg-config ninja-build clang-format
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev libspeexdsp-dev pkg-config ninja-build clang-format
 
       - name: Check formatting
         run: find src tests -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror
@@ -177,7 +177,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev pkg-config ninja-build clang libclang-rt-18-dev
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev libspeexdsp-dev pkg-config ninja-build clang libclang-rt-18-dev
 
       - name: Build fuzzers
         run: |

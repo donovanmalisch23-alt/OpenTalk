@@ -110,6 +110,18 @@ Deliverables: [project brief](project-brief.md), [risk assessment](risk-assessme
 
 Effects pipeline; media player plugin; per-process WASAPI loopback that excludes OpenTalk's own output; whole-device loopback with feedback warnings; a virtual-driver feasibility report, with cost, for an owner decision.
 
+**Done** ([ADR 0010](architecture/decisions/0010-voice-processing-media-and-system-audio.md)):
+
+- **Voice processing:** noise suppression (on by default), automatic gain and echo cancellation (speexdsp).
+- **Voice effects:** rumble filter, bass, treble and a voice changer, on the audio worker thread.
+- **Playing files into a channel** (WAV, FLAC, MP3), labelled as a file, with pause, skip and stop. This is a **built-in player rather than a plugin**: the plugin message channel cannot carry 50 audio frames a second. Bots get the same reader in SDK 0.4, and the example bot gained `!play`.
+- **Sharing computer audio:** per-process loopback that leaves OpenTalk out (Windows 11), and whole-device loopback with OpenTalk's own sound removed by echo cancellation plus an explicit warning (Windows 10).
+- **Listener controls:** files and computer audio from others can be muted separately from voices.
+- **A separate permission** (`media.transmit`) for files and computer audio.
+- **The [virtual-driver feasibility report](audio/virtual-driver-feasibility.md)** for the owner.
+
+**Exit criterion:** "a user can play a file into a channel and share computer audio without others hearing themselves, and both are clearly labelled for listeners." Met in automated tests with synthetic devices (`tst_audio_engine`, `tst_media_ui`). **Remaining:** listening checks on real Windows 10 and 11 hardware (NVDA script steps 65–74).
+
 ## Phase 8: Hosting, deployment and hardening
 
 Public-hosting guide, reachability self-test, certificate setup, **packaged OpenSSL on a supported LTS series, with licence notices for all bundled libraries**, remembered passwords in Windows Credential Manager, installer (and portable build), backups and restore, static analysis and dependency scanning in CI, longer fuzzing, resource-exhaustion tests, a release signing decision.

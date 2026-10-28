@@ -116,6 +116,34 @@ private:
     std::unique_ptr<Private> d;
 };
 
+/// Reads a WAV, FLAC or MP3 file as 48 kHz mono, 20 ms at a time, for bots that play
+/// music or recordings into a channel (since SDK 0.4). Encode each frame with an
+/// AudioEncoder (Content::Music) and send it with sendAudio(packet, AudioStream::Media),
+/// one frame every 20 ms, so listeners hear it labelled as a file, not as speech. The
+/// file is read a little at a time, so long recordings are fine.
+class AudioFileReader {
+public:
+    AudioFileReader();
+    ~AudioFileReader();
+    AudioFileReader(const AudioFileReader &) = delete;
+    AudioFileReader &operator=(const AudioFileReader &) = delete;
+
+    bool open(const QString &path, QString *errorMessage = nullptr);
+    void close();
+    bool isOpen() const;
+    /// The next AudioEncoder::kFrameSamples samples, the last one padded with silence;
+    /// empty once the file has ended.
+    QList<float> readFrame();
+    /// Length in milliseconds, or -1 if the file does not say.
+    qint64 durationMs() const;
+    qint64 positionMs() const;
+    bool seekMs(qint64 ms);
+
+private:
+    class Private;
+    std::unique_ptr<Private> d;
+};
+
 struct TextMessage {
     enum class Kind { Channel, Direct, ServerWide };
     Kind kind = Kind::Channel;

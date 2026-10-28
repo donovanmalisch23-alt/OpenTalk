@@ -1,6 +1,6 @@
 # Status and verification report
 
-**Last updated:** 2026-10-28. Phases 0, 2, 3, 4, 5 and 6 are complete. Still open: the manual NVDA pass, the application icon, checks of Phase 4 on real sound hardware, and legal review of the plugin licensing policy.
+**Last updated:** 2026-10-28. Phases 0, 2, 3, 4, 5, 6 and 7 are complete. Still open: the manual NVDA pass, the application icon, checks of Phases 4 and 7 on real sound hardware, legal review of the plugin licensing policy, and the owner's decision on a virtual audio driver.
 
 ## What works today
 
@@ -28,6 +28,14 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 - Examples: a dice roller in C++ and a "who is here" plugin in Python.
 - Bot accounts (`--bot`) that everyone sees marked as bots, SDK 0.3 with audio, and an example greeter bot that greets, answers commands and plays a tone.
 
+**Advanced audio (Phase 7):**
+
+- Noise suppression (on by default), automatic gain and echo cancellation; voice effects (rumble filter, bass, treble, voice changer).
+- Playing WAV, FLAC and MP3 files into a channel with pause, skip and stop, and sharing computer audio: OpenTalk's own sound is left out on Windows 11, and removed by echo cancellation with a warning on Windows 10.
+- Listeners see "playing a file" or "sharing computer audio", never "talking", and can mute both without muting voices. A separate permission controls who may stream.
+- SDK 0.4 lets bots play files; the example bot has `!play`.
+- All of it is tested with synthetic sound devices and generated signals. **None of it has been tried on real sound hardware yet.**
+
 | Area | State | Evidence |
 |---|---|---|
 | Build (CMake, C++20; MSVC, GCC and Clang with warnings as errors) | Built on Windows and Linux CI | Windows: MSVC 14.44, Qt 6.8.3, vcpkg OpenSSL 3.6.5 and libsodium 1.0.22. Linux: GCC 13.3 and Clang 18.1, Qt 6.4.2 |
@@ -42,7 +50,7 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Plugin manifests, installation, consent records, updates needing review | Unit-tested | `tst_plugin_manifest` (22) |
 | Plugins as real processes: both directions of messages, menu commands, enforcement of permissions, floods, oversized lines, garbage, hangs and crash loops; the C++ and Python examples | Integration-tested against a real server | `tst_plugins` (10) |
 | Plugins in the app: install, consent, Plugins menu, log, turn off, remove, review after an update, accessible names | Integration-tested (offscreen) | `tst_plugin_ui` (2) |
-| SDK 0.3 and the example bot as a real program: bot marking, greeting, commands, audio | Integration-tested against a real server | `tst_examples` |
+| SDK 0.4 and the example bot as a real program: bot marking, greeting, commands, audio, playing files | Integration-tested against a real server | `tst_examples` |
 | Owner recovery, audit verification and export on the command line | Integration-tested against the real program | `tst_server_process` |
 | TLS transport, hostile clients | Integration-tested | `tst_tls_session` (15) |
 | Several clients chatting; reconnection after a server restart | Integration-tested | `tst_chat_session` (9); 10 runs in a row with no failures |
@@ -50,21 +58,30 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Hosting a server from the app | Integration-tested against the real program | `tst_local_server`; `tst_mainwindow_online` hosting test |
 | Main window connected to a real server: trust prompt, tree, chat, private messages, announcements, accessible names | Integration-tested (offscreen) | `tst_mainwindow_online` (10) |
 | Announcement spacing and coalescing | Unit-tested | `tst_announcements` |
-| Audio engine: Opus, jitter buffer, mixing, voice activation, push-to-talk, mute, deafen, user volume, device recovery | Unit-tested with a synthetic sound device (tone detection) | `tst_audio_core` (17), `tst_audio_engine` (9) |
+| Audio engine: Opus, jitter buffer, mixing, voice activation, push-to-talk, mute, deafen, user volume, device recovery | Unit-tested with a synthetic sound device (tone detection) | `tst_audio_core` (17), `tst_audio_engine` (15 with Phase 7) |
+| Noise suppression, automatic gain, echo cancellation (also while both people talk) | Unit-tested on generated speech, noise and echo | `tst_voice_processing` (9); quality and cost in the [benchmarks](audio/benchmarks.md) |
+| Voice effects: filter responses, voice changer pitch | Unit-tested (measured gains and pitch) | `tst_voice_effects` (6) |
+| Reading WAV, FLAC and MP3 files in pieces, resampling, seeking, refusing other files | Unit-tested | `tst_media_file` (5) |
+| Streaming a file at real speed, pause, skip, stop, end; muting others' files; sharing computer audio with and without leaving OpenTalk out (own sound 32–43 dB lower in the fallback) | Unit-tested with synthetic devices, including a simulated Windows 10 loopback | `tst_audio_engine` |
+| Files and computer audio in the app: menu, shortcuts, status, labels for listeners, announcements, muting, warning on Windows 10, stop on disconnect, guests refused | Integration-tested (offscreen, two windows and a real server) | `tst_media_ui` (7) |
+| `media.transmit` enforced separately from voice, per channel; voice mutes silence streams too | Unit-tested | `tst_moderation_server` (`streamingFilesNeedsItsOwnPermission`) |
+| The example bot plays files from its folder only, as media | Integration-tested against a real server | `tst_examples` |
+| Files and computer audio with real devices on Windows 10 and 11 | **Not yet verified** | NVDA script steps 65–74 |
 | Voice encryption, forwarding and fallback | Unit-tested, fuzzed and integration-tested over real sockets | `tst_packetcipher` (10), `tst_voicerouter` (10), `tst_voice_session` (5 tests: UDP, TCP fallback, a server without UDP, channel isolation, a tone travelling end to end); `fuzz_voice_router` (434,200 inputs locally, no failures) |
 | Voice in the app: push-to-talk key, audio menu, settings pages, talking indicators, per-user volume | Unit- and integration-tested (offscreen) | `tst_pushtotalk` (10), `tst_mainwindow` (11), `tst_mainwindow_online` voice test |
 | Audio performance | Measured on a VM without sound hardware | [Benchmarks](audio/benchmarks.md) |
 | Voice with real microphones and speakers on Windows | **Not yet verified** | Needs `opentalk-audio-bench device-loopback` and a listening test |
-| All tests under AddressSanitizer and UBSan | Passing (33 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
+| All tests under AddressSanitizer and UBSan | Passing (37 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
 | Portable Windows zip | Built and smoke-tested in CI | With only Windows on `PATH`, the smoke test generates a certificate, logs in, runs the Opus benchmark and sends voice through a server |
-| NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 45 steps |
+| NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 74 steps |
 | Ctrl+C shutdown of `opentalk-server` in a Windows console | **Not yet verified manually** | Shutdown when the app closes the server's input is tested on Windows CI |
 
 ## Known limitations
 
 - There is no server-side message history (by design for now: messages are not stored).
 - Moderation gaps: bans by address range, reporting a single message, and a mass-action safeguard ([details](security/moderation-model.md#not-yet-implemented)).
-- Plugins are not sandboxed by the operating system (they run with the user's rights), and cannot yet play audio (planned with media streaming in Phase 7).
+- Plugins are not sandboxed by the operating system (they run with the user's rights), and cannot play audio; bots built with the SDK can.
+- Only WAV, FLAC and MP3 files can be played into a channel. On Windows 10, shared computer audio may still carry some of other people's voices; routing OpenTalk to another device avoids it. Echo cancellation cannot remove a screen reader's speech.
 - Voice has not been tried on real sound hardware. Push-to-talk works globally only on Windows; elsewhere it works while OpenTalk's window is in front.
 - Passwords are not remembered; the app asks on each connect.
 - The packaged OpenSSL (3.6.5) series ends support around November 2026. A supported LTS is required before a public release ([ADR 0007](architecture/decisions/0007-openssl-tls-backend.md)).
@@ -73,8 +90,8 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 ## Commands that were run (Linux sandbox, Ubuntu 24.04)
 
 ```sh
-cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 33/33 pass
-cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 33/33 pass
+cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 37/37 pass
+cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 37/37 pass
 cmake --preset linux-fuzz  && cmake --build --preset linux-fuzz                                 # 5 fuzzers
 build/linux-fuzz/tests/fuzz/fuzz_voice_router -max_total_time=60 corpus/                        # no failures
 build/linux-release/tools/audio-bench/opentalk-audio-bench all                                  # docs/audio/benchmarks.md
@@ -91,8 +108,10 @@ Windows results come from the CI runs linked on the pull request.
 
 ## Open items for the owner
 
-1. Run the [NVDA test script](accessibility/nvda-test-script.md) on the portable zip. Steps 19–30 cover hosting, joining and chatting; steps 33–43 cover voice; steps 46–57 cover moderation; steps 58–64 cover plugins.
+1. Run the [NVDA test script](accessibility/nvda-test-script.md) on the portable zip. Steps 19–30 cover hosting, joining and chatting; steps 33–43 cover voice; steps 46–57 cover moderation; steps 58–64 cover plugins; steps 65–74 cover voice processing, files and computer audio.
 2. With headphones (or a cable from output to input), try voice with a second person and run `opentalk-audio-bench device-loopback`; please record the result in an issue.
 3. Switch the repository's default branch to `main` (Settings → General → Default branch).
 4. Paste the repository description and enable private vulnerability reporting (Settings → Security).
 5. Have the [plugin licensing policy](plugins/licensing.md) reviewed by a lawyer before the first public release. It decides whether third-party plugins may use any licence.
+6. Decide on a virtual audio driver using the [feasibility report](audio/virtual-driver-feasibility.md). The recommendation is not to build one now; you approved "no virtual audio driver for now" on 2026-10-26, and the report confirms the costs.
+7. Try steps 65–74 of the NVDA script (files and computer audio), on Windows 11 and, if possible, Windows 10.

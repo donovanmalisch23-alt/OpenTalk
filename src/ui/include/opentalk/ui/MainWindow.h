@@ -54,6 +54,9 @@ class ChannelTree;
 ///   Ctrl+T            talk on/off (push-to-talk mode)   Ctrl+M  mute microphone
 ///   Ctrl+Shift+M      mute everything you hear          Ctrl+Shift+V  volume for the selected user
 ///   Ctrl+Shift+A      administration (for moderators and administrators)
+///   Ctrl+Shift+F      stream a file into the channel   Ctrl+Shift+K  pause or resume it
+///   Ctrl+Shift+J / L  back / forward 10 seconds        Ctrl+Shift+X  stop streaming
+///   Ctrl+Shift+I      say what is streaming            Ctrl+Shift+C  share computer audio on/off
 ///   Alt+P             Plugins menu (manage plugins, and the plugins' own commands)
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -110,6 +113,8 @@ public:
     void setTrustPrompt(TrustPrompt prompt) { m_trustPrompt = std::move(prompt); }
     void setErrorReporter(ErrorReporter reporter) { m_errorReporter = std::move(reporter); }
     void setAnnouncementHook(std::function<void(const QString &)> hook) { m_announcementHook = std::move(hook); }
+    /// Replaces the "choose a file to stream" dialog; returns the path, or empty to cancel.
+    void setMediaFileChooser(std::function<QString()> chooser) { m_mediaFileChooser = std::move(chooser); }
 
 public slots:
     void focusPane(opentalk::ui::MainWindow::Pane pane);
@@ -136,6 +141,12 @@ public slots:
     void openAdministration();
     void sendBroadcast();
     void openPluginManager();
+    void streamFile();
+    void toggleMediaPaused();
+    void skipMedia(qint64 deltaMs);
+    void stopMedia();
+    void sayMediaStatus();
+    void toggleSystemAudioSharing();
     /// Opens the warn/mute/kick/ban dialog for the selected user, preset to `type`.
     void moderateSelectedUser(opentalk::moderation::SanctionType type);
 
@@ -178,6 +189,8 @@ private:
     static QString friendlyError(const protocol::Error &error);
     void buildAudio(std::unique_ptr<audio::AudioBackend> backend);
     void updateVoiceStatus();
+    void updateMediaActions();
+    void onUserActivityChanged(quint32 userId, int streams);
     void playSound(audio::EventSound sound);
     std::optional<quint32> selectedUserId() const;
     void openSettingsAt(const QString &category);
@@ -198,6 +211,7 @@ private:
     TrustPrompt m_trustPrompt;
     ErrorReporter m_errorReporter;
     std::function<void(const QString &)> m_announcementHook;
+    std::function<QString()> m_mediaFileChooser;
     AnnouncementQueue *m_announcements = nullptr;
     QTimer m_refreshTimer;
 
@@ -223,6 +237,14 @@ private:
     QAction *m_transmitAction = nullptr;
     QAction *m_muteAction = nullptr;
     QAction *m_deafenAction = nullptr;
+    QAction *m_streamFileAction = nullptr;
+    QAction *m_pauseMediaAction = nullptr;
+    QAction *m_skipBackAction = nullptr;
+    QAction *m_skipForwardAction = nullptr;
+    QAction *m_stopMediaAction = nullptr;
+    QAction *m_mediaStatusAction = nullptr;
+    QAction *m_shareSystemAudioAction = nullptr;
+    QAction *m_muteIncomingMediaAction = nullptr;
     QAction *m_userVolumeAction = nullptr;
     QAction *m_editChannelAction = nullptr;
     QAction *m_broadcastAction = nullptr;

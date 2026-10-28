@@ -17,6 +17,11 @@ struct SyntheticAudioBackend::Impl {
     std::atomic<bool> running{false};
     std::atomic<bool> failed{false};
     qint64 sampleIndex = 0;
+    std::function<float(qint64)> loopbackGenerator;
+    bool canExclude = false;
+    RingBuffer *loopbackRing = nullptr; ///< Guarded by mutex
+    bool loopbackIncludesOwn = false;
+    std::atomic<bool> loopbackFailed{false};
 };
 
 SyntheticAudioBackend::SyntheticAudioBackend(std::function<float(qint64)> generator)
@@ -64,6 +69,15 @@ bool SyntheticAudioBackend::start(const QString &, const QString &, RingBuffer &
             playback.read(buffer.data(), buffer.size()); // missing samples stay silent (an underrun)
             {
                 std::lock_guard lock(d->mutex);
+                if (d->loopbackRing != nullptr) {
+                    std::vector<float> system(buffer.size());
+                    const qint64 first = d->sampleIndex - static_cast<qint64>(buffer.size());
+                    for (std::size_t i = 0; i < system.size(); ++i) {
+                        system[i] = d->loopbackGenerator(first + static_cast<qint64>(i)) +
+                                    (d->loopbackIncludesOwn ? buffer[i] : 0.0f);
+                    }
+                    d->loopbackRing->write(system.data(), system.size());
+                }
                 d->recorded += QVector<float>(buffer.begin(), buffer.end());
                 if (d->recorded.size() > kSampleRate * 120) {
                     d->recorded.remove(0, kSampleRate * 60);
@@ -104,6 +118,52 @@ void SyntheticAudioBackend::clearRecording()
 {
     std::lock_guard lock(d->mutex);
     d->recorded.clear();
+}
+
+void SyntheticAudioBackend::setLoopback(std::function<float(qint64)> generator, bool canExcludeOwnProcess)
+{
+    std::lock_guard lock(d->mutex);
+    d->loopbackGenerator = std::move(generator);
+    d->canExclude = canExcludeOwnProcess;
+}
+
+bool SyntheticAudioBackend::supportsLoopback() const
+{
+    std::lock_guard lock(d->mutex);
+    return static_cast<bool>(d->loopbackGenerator);
+}
+
+bool SyntheticAudioBackend::startLoopback(RingBuffer &ring, bool excludeOwnProcess, QString *errorMessage)
+{
+    std::lock_guard lock(d->mutex);
+    if (!d->loopbackGenerator || (excludeOwnProcess && !d->canExclude)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("not supported by this synthetic device");
+        }
+        return false;
+    }
+    d->loopbackRing = &ring;
+    d->loopbackIncludesOwn = !excludeOwnProcess;
+    d->loopbackFailed = false;
+    return true;
+}
+
+void SyntheticAudioBackend::stopLoopback()
+{
+    std::lock_guard lock(d->mutex);
+    d->loopbackRing = nullptr;
+}
+
+bool SyntheticAudioBackend::hasLoopbackFailed() const
+{
+    return d->loopbackFailed;
+}
+
+void SyntheticAudioBackend::simulateLoopbackFailure()
+{
+    std::lock_guard lock(d->mutex);
+    d->loopbackRing = nullptr;
+    d->loopbackFailed = true;
 }
 
 void SyntheticAudioBackend::simulateFailure()
