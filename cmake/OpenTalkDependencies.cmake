@@ -17,3 +17,17 @@ else()
     pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.18)
     target_link_libraries(opentalk_sodium INTERFACE PkgConfig::SODIUM)
 endif()
+
+# Opus: voice codec.
+add_library(opentalk_opus INTERFACE)
+add_library(OpenTalk::Opus ALIAS opentalk_opus)
+find_package(Opus CONFIG QUIET)
+if(Opus_FOUND)
+    target_link_libraries(opentalk_opus INTERFACE Opus::opus)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus>=1.3)
+    target_link_libraries(opentalk_opus INTERFACE PkgConfig::OPUS)
+endif()
+
+find_package(Threads REQUIRED)

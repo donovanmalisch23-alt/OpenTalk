@@ -5,7 +5,7 @@ project(OpenTalk
     VERSION 0.1.0
     DESCRIPTION "Open-source, self-hosted, accessible voice and text communication"
     HOMEPAGE_URL "https://github.com/donovanmalisch23-alt/OpenTalk"
-    LANGUAGES CXX)
+    LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

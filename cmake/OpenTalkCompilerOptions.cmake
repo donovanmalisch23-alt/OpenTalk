@@ -32,3 +32,7 @@ target_compile_definitions(opentalk_compiler_options INTERFACE
     QT_NO_URL_CAST_FROM_STRING
     QT_NO_NARROWING_CONVERSIONS_IN_CONNECT
     QT_DISABLE_DEPRECATED_UP_TO=0x060400)
+if(WIN32)
+    # Keep <windows.h> from defining min and max macros that break std::min and std::max.
+    target_compile_definitions(opentalk_compiler_options INTERFACE NOMINMAX)
+endif()

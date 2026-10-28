@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "dependencies": [
     "libsodium",
-    "openssl"
+    "openssl",
+    "opus"
   ],
   "builtin-baseline": "0e5030f583a5427123cd3b714255e5ae62faa3ba"
 }

@@ -5,6 +5,7 @@
 add_subdirectory(logging)
 add_subdirectory(storage)
 add_subdirectory(protocol)
+add_subdirectory(audio)
 add_subdirectory(security)
 add_subdirectory(client)
 add_subdirectory(server)
