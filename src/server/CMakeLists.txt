@@ -5,10 +5,12 @@ add_library(opentalk_server STATIC
     include/opentalk/server/ServerDatabase.h
     include/opentalk/server/ServerCore.h
     include/opentalk/server/PasswordWorker.h
+    include/opentalk/server/VoiceRouter.h
     Server.cpp
     ServerDatabase.cpp
     ServerCore.cpp
-    PasswordWorker.cpp)
+    PasswordWorker.cpp
+    VoiceRouter.cpp)
 add_library(OpenTalk::Server ALIAS opentalk_server)
 target_include_directories(opentalk_server PUBLIC include)
 target_link_libraries(opentalk_server

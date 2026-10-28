@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# TLS setup and server-identity checks shared by the client and the server.
+# TLS setup, server-identity checks, password hashing and voice packet encryption,
+# shared by the client and the server.
 add_library(opentalk_security STATIC
     include/opentalk/security/Tls.h
     include/opentalk/security/ServerTrust.h
     include/opentalk/security/PasswordHash.h
     include/opentalk/security/CertificateGenerator.h
+    include/opentalk/security/PacketCipher.h
     Tls.cpp
     ServerTrust.cpp
     PasswordHash.cpp
-    CertificateGenerator.cpp)
+    CertificateGenerator.cpp
+    PacketCipher.cpp)
 add_library(OpenTalk::Security ALIAS opentalk_security)
 target_include_directories(opentalk_security PUBLIC include)
 target_link_libraries(opentalk_security

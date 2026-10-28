@@ -7,6 +7,8 @@
 #include "opentalk/server/ServerCore.h"
 
 #include <QDateTime>
+#include <QNetworkDatagram>
+#include <QNetworkProxy>
 #include <QSslKey>
 #include <QSslSocket>
 #include <QTcpServer>
@@ -119,6 +121,27 @@ bool Server::start(QString *errorMessage)
             peer->session->closeWithError(code, detail);
         }
     });
+    m_voice = std::make_unique<VoiceRouter>(
+        m_config.voice, [this](quint32 id) { return m_core->voiceRecipients(id); },
+        [this] { return m_clock.elapsed(); });
+    connect(m_core.get(), &ServerCore::userOnline, this, [this](quint32 id) {
+        if (Peer *peer = m_peers.value(id); peer != nullptr && peer->session != nullptr) {
+            peer->session->sendMessage(m_voice->addSession(id, udpPort()));
+        }
+    });
+    connect(m_voice.get(), &VoiceRouter::sendDatagram, this,
+            [this](const QByteArray &datagram, const QHostAddress &to, quint16 port) {
+                if (m_udp) {
+                    m_udp->writeDatagram(datagram, to, port);
+                }
+            });
+    connect(m_voice.get(), &VoiceRouter::sendTunnel, this, [this](quint32 id, const protocol::AudioData &audio) {
+        Peer *peer = m_peers.value(id);
+        if (peer != nullptr && peer->session != nullptr &&
+            peer->socket->bytesToWrite() <= m_config.maxTunnelBacklogBytes) {
+            peer->session->sendMessage(audio);
+        }
+    });
     m_config.session.guestsAllowed = m_config.allowGuests;
 
     m_clock.start();
@@ -134,10 +157,38 @@ bool Server::start(QString *errorMessage)
         m_listener.reset();
         return false;
     }
+    if (m_config.enableUdp) {
+        m_udp = std::make_unique<QUdpSocket>();
+        m_udp->setProxy(QNetworkProxy::NoProxy); // a server answers directly
+        if (m_udp->bind(m_config.address, serverPort())) {
+            connect(m_udp.get(), &QUdpSocket::readyRead, this, [this] {
+                while (m_udp && m_udp->hasPendingDatagrams()) {
+                    const QNetworkDatagram datagram = m_udp->receiveDatagram(2048);
+                    m_voice->handleDatagram(datagram.data(), datagram.senderAddress(),
+                                            static_cast<quint16>(datagram.senderPort()));
+                }
+            });
+        } else {
+            qCWarning(lcServer).noquote() << "Voice will use TLS connections only; cannot use UDP port" << serverPort()
+                                          << ":" << m_udp->errorString();
+            m_udp.reset();
+        }
+    }
     m_stopping = false;
     m_tickTimer.start();
-    qCInfo(lcServer).noquote() << "Listening on" << m_config.address.toString() << "port" << serverPort();
+    qCInfo(lcServer).noquote() << "Listening on" << m_config.address.toString() << "port" << serverPort()
+                               << (m_udp ? "(TCP and UDP)" : "(TCP only)");
     return true;
+}
+
+quint16 Server::udpPort() const
+{
+    return m_udp ? m_udp->localPort() : 0;
+}
+
+VoiceRouter::Stats Server::voiceStats() const
+{
+    return m_voice ? m_voice->stats() : VoiceRouter::Stats{};
 }
 
 bool Server::isListening() const
@@ -213,11 +264,17 @@ void Server::acceptConnection(qintptr socketDescriptor)
             m_core->sessionStarted(peer->id, peer->address);
             emit sessionEstablished(peer->id, hello);
         });
-        connect(session, &protocol::Session::applicationMessage, this,
-                [this, peer](const protocol::Message &message) { m_core->handleMessage(peer->id, message); });
+        connect(session, &protocol::Session::applicationMessage, this, [this, peer](const protocol::Message &message) {
+            if (const auto *audio = std::get_if<protocol::AudioData>(&message)) {
+                m_voice->handleTunnel(peer->id, *audio);
+            } else {
+                m_core->handleMessage(peer->id, message);
+            }
+        });
         connect(session, &protocol::Session::closed, this, [this, peer](const CloseInfo &info) {
             qCInfo(lcServer).noquote() << "Session" << peer->id << "closed:" << protocol::toString(info.code)
                                        << info.detail;
+            m_voice->removeSession(peer->id);
             m_core->sessionEnded(peer->id);
             emit sessionClosed(peer->id, info);
         });
@@ -297,6 +354,7 @@ void Server::finishStopIfDone()
     m_shutdownTimer.stop();
     m_tickTimer.stop();
     m_listener.reset();
+    m_udp.reset();
     qCInfo(lcServer) << "Stopped";
     // Always asynchronous, so callers can connect to stopped() after calling stop().
     QTimer::singleShot(0, this, &Server::stopped);

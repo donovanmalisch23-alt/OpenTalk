@@ -4,6 +4,7 @@
 #include "opentalk/protocol/Messages.h"
 #include "opentalk/protocol/Session.h"
 #include "opentalk/security/PasswordHash.h"
+#include "opentalk/server/VoiceRouter.h"
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -11,6 +12,7 @@
 #include <QObject>
 #include <QSslConfiguration>
 #include <QTimer>
+#include <QUdpSocket>
 
 #include <memory>
 
@@ -39,6 +41,13 @@ struct ServerConfig {
     ServerDatabase *database = nullptr;
     /// Argon2id cost for channel passwords (tests lower it to stay fast).
     security::PasswordHashCost passwordCost = security::PasswordHashCost::interactive();
+    /// Offer encrypted UDP voice on the same port number as the TLS listener. Without
+    /// it (or if the port cannot be bound) voice travels over the TLS connection.
+    bool enableUdp = true;
+    VoiceRouter::Config voice;
+    /// Audio for a client whose connection has this much unsent data is dropped rather
+    /// than queued, so one slow client cannot build up delay or memory.
+    qint64 maxTunnelBacklogBytes = 256 * 1024;
 };
 
 /// Accepts TLS connections and runs one ServerSession per client. Runs on the thread
@@ -63,6 +72,9 @@ public:
     /// Users who are logged in.
     int onlineUserCount() const;
     QString certificateFingerprint() const;
+    /// The UDP voice port, or 0 if voice uses only the TLS connections.
+    quint16 udpPort() const;
+    VoiceRouter::Stats voiceStats() const;
 
 signals:
     void sessionEstablished(quint32 sessionId, const opentalk::protocol::Hello &client);
@@ -82,6 +94,8 @@ private:
     std::unique_ptr<Listener> m_listener;
     std::unique_ptr<PasswordWorker> m_passwords;
     std::unique_ptr<ServerCore> m_core;
+    std::unique_ptr<VoiceRouter> m_voice;
+    std::unique_ptr<QUdpSocket> m_udp;
     QHash<quint32, Peer *> m_peers;
     QHash<QHostAddress, int> m_connectionsPerAddress;
     quint32 m_nextId = 1;

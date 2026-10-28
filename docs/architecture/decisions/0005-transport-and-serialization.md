@@ -1,13 +1,13 @@
 # ADR 0005: TLS/TCP control channel with CBOR; separate UDP audio
 
-**Status:** Control channel accepted and implemented in Phase 2. The audio part stays provisional until the Phase 4 audio-encryption decision.
+**Status:** Accepted. The control channel was implemented in Phase 2; audio and its encryption in Phase 4 ([ADR 0008](0008-voice-encryption.md)).
 
 **Context:** Control messages must be reliable and ordered. Voice must be low latency, and a lost packet is better than a late one. Everything must be encrypted with standard protocols.
 
 **Decision:**
 
 - **Control:** TCP with TLS 1.3 (`QSslSocket`). Length-prefixed frames ([framing implemented](../../protocol/proposal.md#framing)) carry CBOR-encoded messages. CBOR is binary, compact and self-describing, and Qt has it built in (`QCborStreamReader`/`QCborValue`), so it adds no dependency.
-- **Audio:** UDP datagrams carrying Opus frames. The encryption choice is still open: DTLS (preferred) or a reviewed AEAD scheme keyed from the TLS session. If UDP is blocked, audio is tunnelled over the control channel and the UI shows a warning that latency will be higher.
+- **Audio:** UDP datagrams carrying Opus frames, encrypted with XChaCha20-Poly1305 using keys sent over the TLS connection ([ADR 0008](0008-voice-encryption.md)). If UDP is blocked, audio is tunnelled over the control channel and the UI shows that voice is using the slower path.
 
 **Rejected:**
 

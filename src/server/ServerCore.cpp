@@ -236,6 +236,27 @@ void ServerCore::goOnline(Client &client, const QString &name, Role role)
     }
     emit sendTo(client.id, snapshot);
     broadcast(UserJoined{client.user}, client.id);
+    emit userOnline(client.id);
+}
+
+QList<quint32> ServerCore::voiceRecipients(quint32 sessionId) const
+{
+    const auto client = m_clients.constFind(sessionId);
+    if (client == m_clients.constEnd() || client->state != ClientState::Online) {
+        return {};
+    }
+    const auto channel = m_channels.constFind(client->user.channelId);
+    if (channel == m_channels.constEnd()) {
+        return {};
+    }
+    QList<quint32> recipients;
+    recipients.reserve(channel->members.size());
+    for (quint32 member : channel->members) {
+        if (member != sessionId) {
+            recipients.append(member);
+        }
+    }
+    return recipients;
 }
 
 // ------------------------------------------------------------------------ channels

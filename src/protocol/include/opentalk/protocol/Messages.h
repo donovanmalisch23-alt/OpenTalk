@@ -41,6 +41,9 @@ enum class MessageType : quint16 {
     // Text (0x0300-0x03FF)
     SendText = 0x0300,
     TextMessage = 0x0301,
+    // Voice (0x0400-0x04FF)
+    AudioSetup = 0x0400,
+    AudioData = 0x0401,
 };
 
 /// Numeric error codes carried by Error and Goodbye messages. Values are part of the
@@ -87,6 +90,10 @@ inline constexpr qsizetype kMaxSnapshotEntries = 10000; ///< Channels or users i
 inline constexpr quint32 kMaxServerPayloadSize = 1024 * 1024;
 /// The root channel always exists and cannot be deleted.
 inline constexpr quint32 kRootChannelId = 1;
+/// Largest Opus packet (RFC 6716, section 3.4).
+inline constexpr qsizetype kMaxAudioPayloadBytes = 1275;
+/// Keys for the encrypted UDP voice channel (XChaCha20-Poly1305).
+inline constexpr qsizetype kAudioKeyBytes = 32;
 
 // ----------------------------------------------------------------- session messages
 
@@ -267,9 +274,40 @@ struct TextMessage {
     friend bool operator==(const TextMessage &, const TextMessage &) = default;
 };
 
+// -------------------------------------------------------------------------- voice
+
+/// Kinds of audio a user can send. Values are part of the wire format.
+enum class AudioStream : quint8 {
+    Voice = 0,       ///< Microphone.
+    Media = 1,       ///< A media file being streamed.
+    SystemAudio = 2, ///< Shared computer audio.
+};
+
+/// Sent by the server after login: how to reach its UDP voice port and the keys that
+/// protect it. Each session gets fresh random keys, one per direction. UDP is optional;
+/// voice falls back to AudioData over this connection when UDP is blocked.
+struct AudioSetup {
+    quint16 udpPort = 0; ///< 0 = the server offers no UDP; use AudioData only.
+    quint32 udpSessionId = 0;
+    QByteArray clientToServerKey;
+    QByteArray serverToClientKey;
+    quint32 maxBitrate = 0; ///< Bits per second per stream the server forwards.
+    friend bool operator==(const AudioSetup &, const AudioSetup &) = default;
+};
+
+/// One Opus packet (20 ms) carried over the TLS connection instead of UDP. From a
+/// client, `userId` is 0; from the server it names the speaker.
+struct AudioData {
+    AudioStream stream = AudioStream::Voice;
+    quint16 sequence = 0;
+    quint32 userId = 0;
+    QByteArray payload;
+    friend bool operator==(const AudioData &, const AudioData &) = default;
+};
+
 using Message = std::variant<Hello, Welcome, Ping, Pong, Goodbye, Error, Authenticate, AuthResult, StateSnapshot,
                              ChannelAdded, ChannelRemoved, JoinChannel, CreateChannel, DeleteChannel, RequestDone,
-                             UserJoined, UserLeft, UserMoved, SendText, TextMessage>;
+                             UserJoined, UserLeft, UserMoved, SendText, TextMessage, AudioSetup, AudioData>;
 
 MessageType messageType(const Message &message);
 

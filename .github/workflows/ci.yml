@@ -164,7 +164,7 @@ jobs:
 
       - name: Run each fuzzer for 1 minute
         run: |
-          for target in frame_decoder message_decoder session server_core; do
+          for target in frame_decoder message_decoder session server_core voice_router; do
             mkdir -p "corpus/$target"
             if [ -d "tests/fuzz/seeds/$target" ]; then cp tests/fuzz/seeds/$target/* "corpus/$target/"; fi
             echo "::group::fuzz_$target"

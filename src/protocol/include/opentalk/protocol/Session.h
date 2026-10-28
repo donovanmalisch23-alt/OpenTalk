@@ -39,6 +39,13 @@ struct CloseInfo {
     QString detail;
 };
 
+/// What to do with an incoming frame before it is decoded.
+enum class FrameAdmission {
+    Accept, ///< Decode and process it.
+    Drop,   ///< Ignore it silently (for example audio over its rate limit).
+    Stop,   ///< Stop processing input; the session has been closed.
+};
+
 class Session : public QObject {
     Q_OBJECT
 
@@ -82,8 +89,8 @@ protected:
 
     virtual void handleMessage(const Message &message, qint64 nowMs) = 0;
     virtual void handleTick(qint64 nowMs) = 0;
-    /// Called for every complete frame before decoding. Return false to stop processing.
-    virtual bool admitFrame(qint64 nowMs);
+    /// Called for every complete frame before decoding.
+    virtual FrameAdmission admitFrame(quint16 type, qint64 nowMs);
 
     qint64 lastReceivedMs() const { return m_lastReceivedMs; }
 
@@ -111,6 +118,11 @@ public:
         /// Token bucket for incoming messages: sustained rate and burst size.
         double messagesPerSecond = 50.0;
         double messageBurst = 100.0;
+        /// Separate bucket for AudioData (voice over this connection when UDP is blocked).
+        /// Up to three 20 ms streams need 150 packets per second. Excess audio is dropped,
+        /// not treated as a protocol violation.
+        double audioPerSecond = 200.0;
+        double audioBurst = 400.0;
     };
 
     ServerSession(Config config, qint64 nowMs, QObject *parent = nullptr);
@@ -128,7 +140,7 @@ signals:
 protected:
     void handleMessage(const Message &message, qint64 nowMs) override;
     void handleTick(qint64 nowMs) override;
-    bool admitFrame(qint64 nowMs) override;
+    FrameAdmission admitFrame(quint16 type, qint64 nowMs) override;
 
 private:
     Config m_config;
@@ -137,6 +149,8 @@ private:
     quint16 m_version = 0;
     double m_tokens;
     qint64 m_lastRefillMs;
+    double m_audioTokens;
+    qint64 m_lastAudioRefillMs;
 };
 
 /// Client side of a connection to a server.
@@ -200,3 +214,5 @@ QString toString(SessionState state);
 Q_DECLARE_METATYPE(opentalk::protocol::CloseInfo)
 Q_DECLARE_METATYPE(opentalk::protocol::Welcome)
 Q_DECLARE_METATYPE(opentalk::protocol::Error)
+Q_DECLARE_METATYPE(opentalk::protocol::AudioData)
+Q_DECLARE_METATYPE(opentalk::protocol::AudioStream)

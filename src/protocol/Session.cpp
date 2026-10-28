@@ -66,9 +66,9 @@ void Session::failProtocol(ErrorCode code, const QString &detail)
     closeWith({CloseInfo::Initiator::Local, code, detail}, Error{code, std::nullopt, detail});
 }
 
-bool Session::admitFrame(qint64)
+FrameAdmission Session::admitFrame(quint16, qint64)
 {
-    return true;
+    return FrameAdmission::Accept;
 }
 
 void Session::receive(QByteArrayView bytes, qint64 nowMs)
@@ -81,8 +81,15 @@ void Session::receive(QByteArrayView bytes, qint64 nowMs)
     QList<Frame> frames;
     const DecodeError framingError = m_decoder.feed(bytes, frames);
     for (const Frame &frame : std::as_const(frames)) {
-        if (m_state == SessionState::Closed || !admitFrame(nowMs)) {
+        if (m_state == SessionState::Closed) {
             return;
+        }
+        const FrameAdmission admission = admitFrame(frame.type, nowMs);
+        if (admission == FrameAdmission::Stop) {
+            return;
+        }
+        if (admission == FrameAdmission::Drop) {
+            continue;
         }
         MessageDecodeResult result = decodeMessage(frame.type, frame.payload);
         if (auto *failure = std::get_if<MessageDecodeFailure>(&result)) {
@@ -127,21 +134,33 @@ ServerSession::ServerSession(Config config, qint64 nowMs, QObject *parent)
     , m_startedMs(nowMs)
     , m_tokens(m_config.messageBurst)
     , m_lastRefillMs(nowMs)
+    , m_audioTokens(m_config.audioBurst)
+    , m_lastAudioRefillMs(nowMs)
 {
     setState(SessionState::Handshaking);
 }
 
-bool ServerSession::admitFrame(qint64 nowMs)
+FrameAdmission ServerSession::admitFrame(quint16 type, qint64 nowMs)
 {
+    if (type == static_cast<quint16>(MessageType::AudioData) && state() == SessionState::Established) {
+        const double elapsed = static_cast<double>(std::max<qint64>(0, nowMs - m_lastAudioRefillMs)) / 1000.0;
+        m_audioTokens = std::min(m_config.audioBurst, m_audioTokens + elapsed * m_config.audioPerSecond);
+        m_lastAudioRefillMs = nowMs;
+        if (m_audioTokens < 1.0) {
+            return FrameAdmission::Drop;
+        }
+        m_audioTokens -= 1.0;
+        return FrameAdmission::Accept;
+    }
     const double elapsedSeconds = static_cast<double>(std::max<qint64>(0, nowMs - m_lastRefillMs)) / 1000.0;
     m_tokens = std::min(m_config.messageBurst, m_tokens + elapsedSeconds * m_config.messagesPerSecond);
     m_lastRefillMs = nowMs;
     if (m_tokens < 1.0) {
         failProtocol(ErrorCode::RateLimited, QStringLiteral("too many messages"));
-        return false;
+        return FrameAdmission::Stop;
     }
     m_tokens -= 1.0;
-    return true;
+    return FrameAdmission::Accept;
 }
 
 void ServerSession::handleMessage(const Message &message, qint64)

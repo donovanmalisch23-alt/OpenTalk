@@ -70,7 +70,7 @@ Client                                   Server
 | 0x0100–0x01FF | Channels: StateSnapshot, Join, Leave, Create, Update, Delete, and their events |
 | 0x0200–0x02FF | Users and presence |
 | 0x0300–0x03FF | Text messages |
-| 0x0400–0x04FF | Audio session control (codec parameters, transmit state); not the audio itself |
+| 0x0400–0x04FF | Voice: UDP setup and keys, and audio over this connection when UDP is blocked ([voice.md](voice.md)) |
 | 0x0500–0x05FF | Moderation and administration |
 | 0x0600–0x06FF | Server management and monitoring |
 | 0x7000–0x7FFF | Reserved for experiments; never used in releases |
@@ -128,6 +128,8 @@ Welcome also carries 6: guests allowed (bool, optional).
 | 0x0202 | UserMoved | S→C | 1: user ID, 2: channel ID |
 | 0x0300 | SendText | C→S | 1: request ID, 2: target (0 channel, 1 user, 2 whole server), 3: target ID, 4: text |
 | 0x0301 | TextMessage | S→C | 1: target, 2: sender's user ID, 3: target ID, 4: text, 5: server time (ms since 1970, UTC) |
+| 0x0400 | AudioSetup | S→C | 1: UDP port (0 = none), 2: UDP session ID, 3: client-to-server key (32 bytes), 4: server-to-client key (32 bytes), 5: maximum bit rate. Sent after login. |
+| 0x0401 | AudioData | both | 1: stream (0 voice, 1 media, 2 computer audio), 2: sequence number, 3: Opus packet (1–1275 bytes), 4: speaker's user ID (server only) |
 
 **Channel** fields: 1: ID, 2: parent ID (0 only for the root), 3: name (empty only for the root), 4: topic, 5: persistent, 6: has password, 7: maximum users. **User** fields: 1: ID, 2: name, 3: role, 4: channel ID.
 
@@ -163,19 +165,14 @@ Welcome also carries 6: guests allowed (bool, optional).
 
 Each `Error` has a numeric `code`, the `requestId` it answers (if any), and a short English `detail` meant for logs. The client builds its user-facing, translatable text from the code. All implemented codes are listed above. Planned: `Banned` (with expiry if temporary) in Phase 5.
 
-## Audio packets (designed)
+## Audio (implemented in Phase 4)
 
-A UDP datagram, before encryption:
+Voice is specified in **[voice.md](voice.md)**. In short:
 
-| Field | Size | Notes |
-|---|---|---|
-| Session-scoped sender ID | 4 | Assigned by the server; not the account ID. |
-| Stream type | 1 | Voice, media or system audio, so receivers can label the source. |
-| Sequence number | 2 | Wraps around; for loss detection and the jitter buffer. |
-| Timestamp | 4 | In 48 kHz samples. |
-| Opus payload | n | 20 ms frames by default; mono 48 kHz for voice. |
+- Opus packets (20 ms, 48 kHz mono) travel in UDP datagrams encrypted with XChaCha20-Poly1305. The keys are sent in `AudioSetup` over this TLS connection.
+- When UDP does not work, the same packets travel as `AudioData` messages over this connection.
 
-The server **forwards** packets to everyone else in the channel and does not mix them (a selective forwarding design). This keeps server CPU low and latency minimal. Clients mix. Audio is encrypted hop by hop, so the server can see it. That is what makes server-side moderation and recording possible, and it is stated plainly in the security documentation. It is **not** end-to-end encryption.
+The server **forwards** packets to everyone else in the channel and does not mix them (a selective forwarding design). This keeps server CPU low and latency minimal; clients mix. Audio is encrypted hop by hop, so the server can see it. That is what makes server-side moderation and recording possible, and it is stated plainly in the security documentation. It is **not** end-to-end encryption.
 
 ## Limits and rate limiting
 

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "opentalk/client/ClientState.h"
+#include "opentalk/client/VoiceTransport.h"
 #include "opentalk/protocol/Messages.h"
 #include "opentalk/protocol/Session.h"
 #include "opentalk/security/ServerTrust.h"
@@ -35,6 +36,8 @@ struct ConnectOptions {
     /// After losing an established connection, try again with growing delays
     /// (1, 2, 4 ... up to 30 seconds) until it works or the user disconnects.
     bool autoReconnect = true;
+    /// Use UDP for voice when it works. Without it voice always uses the TLS connection.
+    bool allowUdp = true;
 };
 
 enum class ConnectionState {
@@ -92,6 +95,15 @@ public:
     /// roundTripMeasured(). Returns false if not connected or a ping is in flight.
     bool measureRoundTrip();
 
+    /// Sends one Opus packet to the users in this user's channel. Returns false if
+    /// voice is not set up yet (not connected).
+    bool sendAudio(protocol::AudioStream stream, quint16 sequence, const QByteArray &opus);
+    /// True once the server has set up voice for this connection.
+    bool isVoiceReady() const { return m_voice.isActive(); }
+    bool isVoiceUsingUdp() const { return m_voice.isUsingUdp(); }
+    /// Highest bit rate the server forwards (0 before voice is ready).
+    quint32 voiceMaxBitrate() const { return m_voice.maxBitrate(); }
+
     ConnectionState state() const { return m_state; }
     const ClientState &serverState() const { return m_serverState; }
     /// What the server announced; valid while connected.
@@ -111,6 +123,11 @@ signals:
     void requestFinished(quint64 requestId, const std::optional<opentalk::protocol::Error> &error,
                          std::optional<quint32> resultId);
     void roundTripMeasured(qint64 milliseconds);
+    /// Voice is set up (after each login) and audio can be sent.
+    void voiceReady();
+    void voicePathChanged(bool usingUdp);
+    /// One Opus packet from another user.
+    void audioReceived(const opentalk::protocol::AudioData &audio);
 
     // Forwarded from serverState() for convenience.
     void textReceived(const opentalk::protocol::TextMessage &message);
@@ -140,6 +157,7 @@ private:
     QElapsedTimer m_clock;
     QString m_serverFingerprint;
     QSet<quint64> m_pendingRequests;
+    VoiceTransport m_voice;
     quint64 m_nextRequestId = 1;
     bool m_loggedIn = false;
     bool m_everConnected = false; ///< Since the last user-initiated connect.

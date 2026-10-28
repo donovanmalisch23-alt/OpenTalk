@@ -58,6 +58,13 @@ Connection::Connection(QObject *parent)
     m_reconnectTimer.setSingleShot(true);
     connect(&m_reconnectTimer, &QTimer::timeout, this, &Connection::startAttempt);
     connect(&m_serverState, &ClientState::textReceived, this, &Connection::textReceived);
+    connect(&m_voice, &VoiceTransport::audioReceived, this, &Connection::audioReceived);
+    connect(&m_voice, &VoiceTransport::pathChanged, this, &Connection::voicePathChanged);
+    connect(&m_voice, &VoiceTransport::tunnelSendRequested, this, [this](const protocol::AudioData &audio) {
+        if (m_session && m_state == ConnectionState::Connected) {
+            m_session->sendMessage(audio);
+        }
+    });
 }
 
 Connection::~Connection()
@@ -75,6 +82,7 @@ void Connection::setState(ConnectionState state)
 
 void Connection::teardown()
 {
+    m_voice.stop();
     m_tickTimer.stop();
     m_connectTimer.stop();
     if (m_session) {
@@ -233,7 +241,26 @@ void Connection::onApplicationMessage(const protocol::Message &message)
         }
         return; // nothing else is meaningful before the snapshot
     }
+    if (const auto *audio = std::get_if<protocol::AudioData>(&message)) {
+        m_voice.receiveTunnel(*audio);
+        return;
+    }
+    if (const auto *setup = std::get_if<protocol::AudioSetup>(&message)) {
+        m_voice.start(*setup, m_socket ? m_socket->peerAddress() : QHostAddress(), m_options.allowUdp);
+        emit voiceReady();
+        return;
+    }
     m_serverState.apply(message);
+}
+
+bool Connection::sendAudio(protocol::AudioStream stream, quint16 sequence, const QByteArray &opus)
+{
+    if (m_state != ConnectionState::Connected || !m_voice.isActive() || opus.isEmpty() ||
+        opus.size() > protocol::kMaxAudioPayloadBytes) {
+        return false;
+    }
+    m_voice.send(protocol::AudioData{stream, sequence, 0, opus});
+    return true;
 }
 
 void Connection::onServerError(const protocol::Error &error)

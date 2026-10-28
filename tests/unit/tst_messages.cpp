@@ -85,6 +85,13 @@ private slots:
         // Emoji sequences use the zero-width joiner, which must stay allowed in chat.
         const QString family = QString::fromUtf8("\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9");
         QTest::newRow("text message") << Message(TextMessage{TextTarget::Server, 1, 0, family, 1790000000000});
+        QTest::newRow("audio setup") << Message(
+            AudioSetup{10350, 0xdeadbeef, QByteArray(32, '\x01'), QByteArray(32, '\x02'), 128000});
+        QTest::newRow("audio setup without udp")
+            << Message(AudioSetup{0, 1, QByteArray(32, '\x03'), QByteArray(32, '\x04'), 64000});
+        QTest::newRow("audio from client")
+            << Message(AudioData{AudioStream::Voice, 65535, 0, QByteArray(kMaxAudioPayloadBytes, '\x7f')});
+        QTest::newRow("audio from server") << Message(AudioData{AudioStream::SystemAudio, 1, 42, QByteArray("x")});
     }
 
     void roundTrip()
@@ -214,6 +221,23 @@ private slots:
             << typeOf(MessageType::SendText) << cbor({{1, 1}, {2, 3}, {3, 1}, {4, QStringLiteral("x")}});
         QTest::newRow("boolean as integer")
             << typeOf(MessageType::CreateChannel) << cbor({{1, 1}, {2, 1}, {3, QStringLiteral("x")}, {5, 1}});
+        const auto setup = [](qsizetype keyLength) {
+            return QCborMap{{1, 1}, {2, 1}, {3, QByteArray(keyLength, 'k')}, {4, QByteArray(32, 'k')}, {5, 1}};
+        };
+        QTest::newRow("short audio key") << typeOf(MessageType::AudioSetup) << cbor(setup(31));
+        QTest::newRow("long audio key") << typeOf(MessageType::AudioSetup) << cbor(setup(33));
+        QTest::newRow("audio key as text")
+            << typeOf(MessageType::AudioSetup)
+            << cbor({{1, 1}, {2, 1}, {3, QString(32, QLatin1Char('k'))}, {4, QByteArray(32, 'k')}, {5, 1}});
+        const auto audio = [](qint64 stream, const QByteArray &payload) {
+            return QCborMap{{1, stream}, {2, 1}, {3, payload}};
+        };
+        QTest::newRow("empty audio") << typeOf(MessageType::AudioData) << cbor(audio(0, QByteArray()));
+        QTest::newRow("audio too big") << typeOf(MessageType::AudioData)
+                                       << cbor(audio(0, QByteArray(kMaxAudioPayloadBytes + 1, 'a')));
+        QTest::newRow("unknown audio stream") << typeOf(MessageType::AudioData) << cbor(audio(3, "a"));
+        QTest::newRow("audio sequence too big")
+            << typeOf(MessageType::AudioData) << cbor({{1, 0}, {2, 65536}, {3, QByteArray("a")}});
         QTest::newRow("error detail too long")
             << typeOf(MessageType::Error) << cbor({{1, 1}, {3, QString(kMaxDetailLength + 1, QLatin1Char('x'))}});
     }
@@ -238,6 +262,8 @@ private slots:
         QVERIFY(isServerToClient(MessageType::TextMessage) && !isClientToServer(MessageType::TextMessage));
         QVERIFY(!isClientToServer(MessageType::StateSnapshot));
         QVERIFY(isClientToServer(MessageType::Ping) && isServerToClient(MessageType::Ping));
+        QVERIFY(isServerToClient(MessageType::AudioSetup) && !isClientToServer(MessageType::AudioSetup));
+        QVERIFY(isClientToServer(MessageType::AudioData) && isServerToClient(MessageType::AudioData));
     }
 
     void oversizedMessagesAreNotEncoded()

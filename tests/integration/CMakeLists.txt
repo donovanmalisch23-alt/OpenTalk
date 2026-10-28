@@ -43,3 +43,11 @@ target_compile_definitions(tst_local_server PRIVATE
 add_dependencies(tst_local_server opentalk_server_app)
 add_test(NAME tst_local_server COMMAND tst_local_server)
 set_tests_properties(tst_local_server PROPERTIES TIMEOUT 180)
+
+qt_add_executable(tst_voice_session tst_voice_session.cpp)
+target_link_libraries(tst_voice_session PRIVATE
+    Qt6::Test OpenTalk::Client OpenTalk::Server OpenTalk::Security OpenTalk::Audio OpenTalk::CompilerOptions)
+target_compile_definitions(tst_voice_session PRIVATE
+    OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+add_test(NAME tst_voice_session COMMAND tst_voice_session)
+set_tests_properties(tst_voice_session PROPERTIES TIMEOUT 180)

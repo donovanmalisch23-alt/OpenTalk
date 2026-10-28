@@ -5,10 +5,12 @@ add_library(opentalk_protocol STATIC
     include/opentalk/protocol/Messages.h
     include/opentalk/protocol/Session.h
     include/opentalk/protocol/Version.h
+    include/opentalk/protocol/VoicePacket.h
     Frame.cpp
     Messages.cpp
     Session.cpp
-    Version.cpp)
+    Version.cpp
+    VoicePacket.cpp)
 add_library(OpenTalk::Protocol ALIAS opentalk_protocol)
 target_include_directories(opentalk_protocol PUBLIC include)
 target_link_libraries(opentalk_protocol

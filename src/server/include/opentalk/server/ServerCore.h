@@ -66,9 +66,14 @@ public:
 
     int onlineUserCount() const;
     QList<protocol::ChannelInfo> channels() const;
+    /// Sessions that should hear audio from `sessionId` now: the other users in its
+    /// channel. Empty if the session is not logged in.
+    QList<quint32> voiceRecipients(quint32 sessionId) const;
 
 signals:
     void sendTo(quint32 sessionId, const opentalk::protocol::Message &message);
+    /// The session logged in and has received its state snapshot.
+    void userOnline(quint32 sessionId);
     /// Send Error{code} to the session and close it.
     void closeSession(quint32 sessionId, opentalk::protocol::ErrorCode code, const QString &detail);
 

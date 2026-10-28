@@ -294,6 +294,29 @@ private slots:
         QVERIFY(p.server.state() == SessionState::Established);
     }
 
+    void excessAudioIsDroppedNotFatal()
+    {
+        Pipe p;
+        p.connect();
+        QList<Message> received;
+        QObject::connect(&p.server, &Session::applicationMessage, [&](const Message &m) { received << m; });
+        QByteArray burst;
+        for (int i = 0; i < 1000; ++i) {
+            burst += encodeMessage(AudioData{AudioStream::Voice, static_cast<quint16>(i), 0, "opus"});
+        }
+        // Audio has its own budget and does not use up the one for control messages.
+        burst += encodeMessage(Ping{1});
+        p.server.receive(burst, 1);
+        QVERIFY(p.server.state() == SessionState::Established);
+        QCOMPARE(received.size(), 400); // the default audio burst
+        // 150 packets per second (three streams) is sustainable.
+        received.clear();
+        for (int i = 0; i < 1500; ++i) {
+            p.server.receive(encodeMessage(AudioData{AudioStream::Voice, 0, 0, "opus"}), 10'000 + i * 1000 / 150);
+        }
+        QCOMPARE(received.size(), 1500);
+    }
+
     void transportLossIsReportedOnce()
     {
         Pipe p;

@@ -82,6 +82,17 @@ constexpr qint64 kMsgFrom = 2;
 constexpr qint64 kMsgTargetId = 3;
 constexpr qint64 kMsgText = 4;
 constexpr qint64 kMsgTime = 5;
+// AudioSetup
+constexpr qint64 kAudioUdpPort = 1;
+constexpr qint64 kAudioUdpSession = 2;
+constexpr qint64 kAudioClientKey = 3;
+constexpr qint64 kAudioServerKey = 4;
+constexpr qint64 kAudioMaxBitrate = 5;
+// AudioData
+constexpr qint64 kDataStream = 1;
+constexpr qint64 kDataSequence = 2;
+constexpr qint64 kDataPayload = 3;
+constexpr qint64 kDataUser = 4;
 } // namespace key
 
 constexpr quint64 k63Bits = 0x7fffffffffffffffULL;
@@ -185,6 +196,21 @@ public:
         }
         const QString s = rawText(k, field, kMaxSecretLength, !required);
         return s;
+    }
+
+    QByteArray bytes(qint64 k, const char *field, qsizetype minLength, qsizetype maxLength)
+    {
+        const QCborValue value = m_map.value(k);
+        if (!value.isByteArray()) {
+            fail(field, "missing or not a byte string");
+            return {};
+        }
+        QByteArray b = value.toByteArray();
+        if (b.size() < minLength || b.size() > maxLength) {
+            fail(field, "wrong length");
+            return {};
+        }
+        return b;
     }
 
     QCborArray array(qint64 k, const char *field, qsizetype maxCount)
@@ -423,6 +449,26 @@ QCborMap toCbor(const TextMessage &m)
             {key::kMsgTime, m.timestampMs}};
 }
 
+QCborMap toCbor(const AudioSetup &m)
+{
+    return {{key::kAudioUdpPort, m.udpPort},
+            {key::kAudioUdpSession, static_cast<qint64>(m.udpSessionId)},
+            {key::kAudioClientKey, m.clientToServerKey},
+            {key::kAudioServerKey, m.serverToClientKey},
+            {key::kAudioMaxBitrate, static_cast<qint64>(m.maxBitrate)}};
+}
+
+QCborMap toCbor(const AudioData &m)
+{
+    QCborMap map{{key::kDataStream, static_cast<int>(m.stream)},
+                 {key::kDataSequence, m.sequence},
+                 {key::kDataPayload, m.payload}};
+    if (m.userId != 0) {
+        map.insert(key::kDataUser, static_cast<qint64>(m.userId));
+    }
+    return map;
+}
+
 // ------------------------------------------------------------------------ decoding
 
 bool isKnownErrorCode(quint16 code)
@@ -498,6 +544,8 @@ bool isKnownType(quint16 type)
     case MessageType::UserMoved:
     case MessageType::SendText:
     case MessageType::TextMessage:
+    case MessageType::AudioSetup:
+    case MessageType::AudioData:
         return true;
     }
     return false;
@@ -559,6 +607,8 @@ MessageType messageType(const Message &message)
         MessageType operator()(const UserMoved &) const { return MessageType::UserMoved; }
         MessageType operator()(const SendText &) const { return MessageType::SendText; }
         MessageType operator()(const TextMessage &) const { return MessageType::TextMessage; }
+        MessageType operator()(const AudioSetup &) const { return MessageType::AudioSetup; }
+        MessageType operator()(const AudioData &) const { return MessageType::AudioData; }
     };
     return std::visit(Visitor{}, message);
 }
@@ -576,6 +626,7 @@ bool isClientToServer(MessageType type)
     case MessageType::CreateChannel:
     case MessageType::DeleteChannel:
     case MessageType::SendText:
+    case MessageType::AudioData:
         return true;
     default:
         return false;
@@ -599,6 +650,8 @@ bool isServerToClient(MessageType type)
     case MessageType::UserLeft:
     case MessageType::UserMoved:
     case MessageType::TextMessage:
+    case MessageType::AudioSetup:
+    case MessageType::AudioData:
         return true;
     default:
         return false;
@@ -782,6 +835,25 @@ MessageDecodeResult decodeMessage(quint16 type, QByteArrayView payload)
         m.targetId = r.integer<quint32>(key::kMsgTargetId, "targetId");
         m.text = r.chatText(key::kMsgText, "text");
         m.timestampMs = r.integer<qint64>(key::kMsgTime, "timestamp");
+        message = m;
+        break;
+    }
+    case MessageType::AudioSetup: {
+        AudioSetup m;
+        m.udpPort = r.integer<quint16>(key::kAudioUdpPort, "udpPort");
+        m.udpSessionId = r.integer<quint32>(key::kAudioUdpSession, "udpSessionId");
+        m.clientToServerKey = r.bytes(key::kAudioClientKey, "clientToServerKey", kAudioKeyBytes, kAudioKeyBytes);
+        m.serverToClientKey = r.bytes(key::kAudioServerKey, "serverToClientKey", kAudioKeyBytes, kAudioKeyBytes);
+        m.maxBitrate = r.integer<quint32>(key::kAudioMaxBitrate, "maxBitrate");
+        message = m;
+        break;
+    }
+    case MessageType::AudioData: {
+        AudioData m;
+        m.stream = r.enumeration<AudioStream>(key::kDataStream, "stream", AudioStream::SystemAudio);
+        m.sequence = r.integer<quint16>(key::kDataSequence, "sequence");
+        m.payload = r.bytes(key::kDataPayload, "payload", 1, kMaxAudioPayloadBytes);
+        m.userId = r.optionalInteger<quint32>(key::kDataUser, "userId").value_or(0);
         message = m;
         break;
     }
