@@ -117,22 +117,34 @@
     {
       "name": "windows-msvc-debug",
       "inherits": "base",
-      "configurePreset": "windows-msvc-debug"
+      "configurePreset": "windows-msvc-debug",
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "windows-msvc-release",
       "inherits": "base",
-      "configurePreset": "windows-msvc-release"
+      "configurePreset": "windows-msvc-release",
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "linux-debug",
       "inherits": "base",
-      "configurePreset": "linux-debug"
+      "configurePreset": "linux-debug",
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "linux-asan",
       "inherits": "base",
-      "configurePreset": "linux-asan"
+      "configurePreset": "linux-asan",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }
