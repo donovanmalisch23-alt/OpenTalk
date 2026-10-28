@@ -16,10 +16,19 @@ option(OPENTALK_BUILD_TESTS "Build the OpenTalk test suite" ON)
 option(OPENTALK_BUILD_FUZZERS "Build libFuzzer targets (Clang only)" OFF)
 option(OPENTALK_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(OPENTALK_ENABLE_SANITIZERS "Build with AddressSanitizer and UBSan (GCC/Clang only)" OFF)
+# Only opentalk-server and opentalk-ping, without Qt Widgets (for servers and containers).
+option(OPENTALK_SERVER_ONLY "Build only the server and opentalk-ping" OFF)
+if(OPENTALK_SERVER_ONLY)
+    set(OPENTALK_BUILD_TESTS OFF)
+endif()
 
 # Qt 6.4 is the oldest version the code is verified against. Windows release
 # builds use a newer Qt LTS; see docs/development/building.md.
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network Sql Widgets)
+if(OPENTALK_SERVER_ONLY)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network Sql)
+else()
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network Sql Widgets)
+endif()
 qt_standard_project_setup()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -27,8 +36,12 @@ include(OpenTalkCompilerOptions)
 include(OpenTalkDependencies)
 
 add_subdirectory(src)
-add_subdirectory(examples)
-add_subdirectory(tools)
+if(OPENTALK_SERVER_ONLY)
+    add_subdirectory(examples/opentalk-ping)
+else()
+    add_subdirectory(examples)
+    add_subdirectory(tools)
+endif()
 
 if(OPENTALK_BUILD_TESTS)
     enable_testing()

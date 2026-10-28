@@ -96,3 +96,11 @@ target_compile_definitions(tst_media_ui PRIVATE
     OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 add_test(NAME tst_media_ui COMMAND tst_media_ui)
 set_tests_properties(tst_media_ui PROPERTIES TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+qt_add_executable(tst_remember_password tst_remember_password.cpp)
+target_link_libraries(tst_remember_password PRIVATE
+    Qt6::Test OpenTalk::Ui OpenTalk::Server OpenTalk::Security OpenTalk::Audio OpenTalk::CompilerOptions)
+target_compile_definitions(tst_remember_password PRIVATE
+    OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+add_test(NAME tst_remember_password COMMAND tst_remember_password)
+set_tests_properties(tst_remember_password PROPERTIES TIMEOUT 120 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

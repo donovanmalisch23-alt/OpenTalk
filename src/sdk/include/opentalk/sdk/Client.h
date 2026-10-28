@@ -212,6 +212,9 @@ public:
 
     /// True once audio can be sent (after each login; see audioReady()).
     bool isAudioReady() const;
+    /// True while audio travels over the faster UDP path; otherwise it goes through the
+    /// main connection (for example when a firewall blocks UDP). Since SDK 0.4.
+    bool isAudioUsingUdp() const;
     /// Sends one Opus packet (20 ms; see AudioEncoder) to the people in your channel.
     /// Send one every 20 ms while talking. Returns false if audio is not ready, the
     /// packet is empty or too large. The server may refuse audio you may not send.
@@ -237,6 +240,8 @@ signals:
     void userUpdated(const opentalk::sdk::User &user);
     /// Audio can be sent (after each login).
     void audioReady();
+    /// Audio switched between UDP and the main connection (since SDK 0.4).
+    void audioPathChanged(bool usingUdp);
     /// One Opus packet from someone in your channel (decode with AudioDecoder).
     void audioReceived(quint32 userId, opentalk::sdk::AudioStream stream, const QByteArray &opusPacket);
 

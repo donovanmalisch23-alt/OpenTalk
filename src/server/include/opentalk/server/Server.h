@@ -50,6 +50,10 @@ struct ServerConfig {
     qint64 maxTunnelBacklogBytes = 256 * 1024;
     /// Audit log entries older than this are removed (0 keeps them forever).
     int auditRetentionDays = 365;
+    /// Automatic database backups (see ServerCore::Config); an empty folder turns them off.
+    QString backupFolder;
+    int backupIntervalHours = 24;
+    int backupsToKeep = 7;
 };
 
 /// Accepts TLS connections and runs one ServerSession per client. Runs on the thread

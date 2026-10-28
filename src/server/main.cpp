@@ -6,6 +6,8 @@
 //   <data>/opentalk.db       accounts and persistent channels (SQLite)
 //   <data>/tls/server.crt    certificate (created on first start if missing)
 //   <data>/tls/server.key    private key (keep secret)
+//   <data>/backups/          automatic daily backups of the database
+//   <data>/server.lock       held while a server uses the folder
 
 #include "Console.h"
 #include "ShutdownSignal.h"
@@ -14,6 +16,7 @@
 #include "opentalk/security/CertificateGenerator.h"
 #include "opentalk/security/PasswordHash.h"
 #include "opentalk/security/Tls.h"
+#include "opentalk/server/Backups.h"
 #include "opentalk/server/Server.h"
 #include "opentalk/server/ServerDatabase.h"
 
@@ -23,7 +26,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLockFile>
 #include <QPointer>
+#include <QSslSocket>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -81,6 +86,60 @@ std::optional<QString> readNewPassword(QString *error)
         }
     }
     return first;
+}
+
+/// Replaces the database with a backup. The caller holds the data folder's lock, so no
+/// server is using the database.
+int restoreBackup(const QString &dataDir, const QString &backupFolder, const QString &backup)
+{
+    QString error;
+    const std::optional<int> version = server::ServerDatabase::checkBackup(backup, &error);
+    if (!version) {
+        return fail(error);
+    }
+    const QString databasePath = dataDir + QStringLiteral("/opentalk.db");
+    if (QFileInfo::exists(databasePath)) {
+        // A consistent copy of what is there now (including anything still in the
+        // write-ahead log), in case the restore was a mistake.
+        server::ServerDatabase current;
+        if (!current.open(databasePath, &error)) {
+            return fail(QStringLiteral("cannot open the current database to keep a copy: %1").arg(error));
+        }
+        // Never reuse a name: it could be the very file being restored.
+        const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+        QString keep = QDir(backupFolder).filePath(QStringLiteral("before-restore-%1.db").arg(stamp));
+        for (int n = 2; QFileInfo::exists(keep); ++n) {
+            keep = QDir(backupFolder).filePath(QStringLiteral("before-restore-%1-%2.db").arg(stamp).arg(n));
+        }
+        if (!QDir().mkpath(backupFolder) || !current.backupTo(keep, &error)) {
+            return fail(QStringLiteral("cannot keep a copy of the current database: %1").arg(error));
+        }
+        current.close();
+        printLine(QStringLiteral("The current database was copied to %1").arg(QDir::toNativeSeparators(keep)));
+    }
+    const QString partial = databasePath + QStringLiteral(".restoring");
+    QFile::remove(partial);
+    if (!QFile::copy(backup, partial)) {
+        return fail(QStringLiteral("cannot copy %1").arg(QDir::toNativeSeparators(backup)));
+    }
+    for (const QString &suffix : {QString(), QStringLiteral("-wal"), QStringLiteral("-shm")}) {
+        QFile::remove(databasePath + suffix);
+    }
+    if (!QFile::rename(partial, databasePath)) {
+        return fail(QStringLiteral("cannot put the backup in place of %1").arg(QDir::toNativeSeparators(databasePath)));
+    }
+    // Opening it upgrades an older backup to this version's format.
+    server::ServerDatabase restored;
+    if (!restored.open(databasePath, &error)) {
+        return fail(error);
+    }
+    printLine(QStringLiteral("Restored %1 (%2 accounts). Start the server again to use it.")
+                  .arg(QDir::toNativeSeparators(backup))
+                  .arg(restored.accounts().size()));
+    if (*version < server::ServerDatabase::kSchemaVersion) {
+        printLine(QStringLiteral("It came from an older OpenTalk and was upgraded."));
+    }
+    return 0;
 }
 
 int runAccountCommand(const QCommandLineParser &parser, const QCommandLineOption &create,
@@ -235,14 +294,35 @@ int main(int argc, char *argv[])
                                              QStringLiteral("Remove audit log entries older than this many days "
                                                             "(default: 365; 0 keeps them forever)."),
                                              QStringLiteral("days"), QStringLiteral("365"));
+    const QCommandLineOption backupOption(QStringLiteral("backup"),
+                                          QStringLiteral("Write a backup of the database to a file and exit. Safe "
+                                                         "while the server is running."),
+                                          QStringLiteral("file"));
+    const QCommandLineOption restoreOption(QStringLiteral("restore"),
+                                           QStringLiteral("Replace the database with a backup and exit. Stop the "
+                                                          "server first; a copy of the current database is kept."),
+                                           QStringLiteral("file"));
+    const QCommandLineOption listBackupsOption(QStringLiteral("list-backups"),
+                                               QStringLiteral("List the automatic backups and exit."));
+    const QCommandLineOption backupDirOption(QStringLiteral("backup-dir"),
+                                             QStringLiteral("Folder for automatic backups (default: <data>/backups)."),
+                                             QStringLiteral("folder"));
+    const QCommandLineOption backupEveryOption(QStringLiteral("backup-every-hours"),
+                                               QStringLiteral("Back up the database automatically this often "
+                                                              "(default: 24; 0 turns automatic backups off)."),
+                                               QStringLiteral("hours"), QStringLiteral("24"));
+    const QCommandLineOption keepBackupsOption(QStringLiteral("keep-backups"),
+                                               QStringLiteral("How many automatic backups to keep (default: 7)."),
+                                               QStringLiteral("count"), QStringLiteral("7"));
     const QCommandLineOption stdinOption(QStringLiteral("stop-when-stdin-closes"),
                                          QStringLiteral("Shut down gracefully when standard input closes. Used when "
                                                         "the OpenTalk app runs the server for you."));
-    parser.addOptions({dataOption,    listenOption,      portOption,        certOption,      keyOption,
-                       nameOption,    maxOption,         guestsOption,      noUdpOption,     logOption,
-                       createOption,  roleOption,        setPasswordOption, deleteOption,    listOption,
-                       recoverOption, verifyAuditOption, exportAuditOption, retentionOption, stdinOption,
-                       botOption});
+    parser.addOptions({dataOption,        listenOption,      portOption,        certOption,        keyOption,
+                       nameOption,        maxOption,         guestsOption,      noUdpOption,       logOption,
+                       createOption,      roleOption,        setPasswordOption, deleteOption,      listOption,
+                       recoverOption,     verifyAuditOption, exportAuditOption, retentionOption,   stdinOption,
+                       botOption,         backupOption,      restoreOption,     listBackupsOption, backupDirOption,
+                       backupEveryOption, keepBackupsOption});
     parser.process(app);
 
     const std::optional<logging::Level> level = logging::levelFromString(parser.value(logOption));
@@ -260,10 +340,57 @@ int main(int argc, char *argv[])
     if (!QDir().mkpath(dataDir)) {
         return fail(QStringLiteral("cannot create the data folder %1").arg(QDir::toNativeSeparators(dataDir)));
     }
+    const QString backupFolder =
+        QDir::cleanPath(parser.isSet(backupDirOption) ? QDir(parser.value(backupDirOption)).absolutePath()
+                                                      : dataDir + QStringLiteral("/backups"));
+    // Held by a running server. Restoring and owner recovery need the database to
+    // themselves, and two servers must never share one data folder.
+    QLockFile lock(dataDir + QStringLiteral("/server.lock"));
+    lock.setStaleLockTime(0); // stale only when the process that held it is gone
+    const auto takeLock = [&lock, &dataDir](const QString &purpose) {
+        if (lock.tryLock(0)) {
+            return true;
+        }
+        printLine(QStringLiteral("Error: an OpenTalk server is using %1. Stop it first to %2.")
+                      .arg(QDir::toNativeSeparators(dataDir), purpose));
+        return false;
+    };
+
+    if (parser.isSet(listBackupsOption)) {
+        const QList<server::BackupFile> backups = server::listBackups(backupFolder);
+        if (backups.isEmpty()) {
+            printLine(QStringLiteral("No automatic backups in %1").arg(QDir::toNativeSeparators(backupFolder)));
+        }
+        for (const server::BackupFile &b : backups) {
+            printLine(
+                QStringLiteral("%1  %2 UTC")
+                    .arg(QDir::toNativeSeparators(b.path), b.time.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+        }
+        return 0;
+    }
+    if (parser.isSet(restoreOption)) {
+        if (!takeLock(QStringLiteral("restore a backup"))) {
+            return 1;
+        }
+        return restoreBackup(dataDir, backupFolder, QFileInfo(parser.value(restoreOption)).absoluteFilePath());
+    }
+
     server::ServerDatabase database;
     QString error;
     if (!database.open(dataDir + QStringLiteral("/opentalk.db"), &error)) {
         return fail(error);
+    }
+
+    if (parser.isSet(backupOption)) {
+        const QString target = QFileInfo(parser.value(backupOption)).absoluteFilePath();
+        if (!database.backupTo(target, &error)) {
+            return fail(error);
+        }
+        if (!server::ServerDatabase::checkBackup(target, &error)) {
+            return fail(QStringLiteral("the backup could not be checked: %1").arg(error));
+        }
+        printLine(QStringLiteral("Wrote a backup of the database to %1").arg(QDir::toNativeSeparators(target)));
+        return 0;
     }
 
     const int accountResult = runAccountCommand(parser, createOption, setPasswordOption, deleteOption, listOption,
@@ -272,6 +399,9 @@ int main(int argc, char *argv[])
         return accountResult;
     }
     if (parser.isSet(recoverOption)) {
+        if (!takeLock(QStringLiteral("recover the owner"))) {
+            return 1;
+        }
         const QString name = parser.value(recoverOption);
         if (!database.setOwner(name, &error)) {
             return fail(error);
@@ -349,6 +479,20 @@ int main(int argc, char *argv[])
         return fail(QStringLiteral("--audit-retention-days must be between 0 and 36500"));
     }
     config.auditRetentionDays = retention;
+    const int backupHours = parser.value(backupEveryOption).toInt(&ok);
+    if (!ok || backupHours < 0 || backupHours > 24 * 365) {
+        return fail(QStringLiteral("--backup-every-hours must be between 0 and 8760"));
+    }
+    const int keepBackups = parser.value(keepBackupsOption).toInt(&ok);
+    if (!ok || keepBackups < 1 || keepBackups > 1000) {
+        return fail(QStringLiteral("--keep-backups must be between 1 and 1000"));
+    }
+    config.backupFolder = backupHours > 0 ? backupFolder : QString();
+    config.backupIntervalHours = backupHours;
+    config.backupsToKeep = keepBackups;
+    if (!takeLock(QStringLiteral("start another one"))) {
+        return 1;
+    }
     const QString name = parser.value(nameOption).trimmed();
     if (name.isEmpty() || name.size() > protocol::kMaxNameLength) {
         return fail(QStringLiteral("--name must be 1 to %1 characters").arg(protocol::kMaxNameLength));
@@ -403,6 +547,15 @@ int main(int argc, char *argv[])
         printLine(QStringLiteral("Voice uses the TCP connections only (no UDP port)."));
     }
     printLine(QStringLiteral("Data folder: %1").arg(QDir::toNativeSeparators(dataDir)));
+    printLine(QStringLiteral("TLS library: %1").arg(QSslSocket::sslLibraryVersionString()));
+    if (!config.backupFolder.isEmpty()) {
+        printLine(QStringLiteral("Automatic backups every %1 hours in %2 (keeping %3).")
+                      .arg(config.backupIntervalHours)
+                      .arg(QDir::toNativeSeparators(config.backupFolder))
+                      .arg(config.backupsToKeep));
+    } else {
+        printLine(QStringLiteral("Automatic backups are off."));
+    }
     if (database.accounts().isEmpty()) {
         printLine(QStringLiteral("There are no accounts yet. Create the owner (yourself) with:"));
         printLine(QStringLiteral("  opentalk-server --data-dir \"%1\" --create-account <name> --role owner")

@@ -5,9 +5,15 @@
 //
 //   opentalk-ping example.org --port 10350 --fingerprint SHA256:AB:CD:...
 //   opentalk-ping example.org --user alice < password.txt
+//   opentalk-ping example.org --fingerprint SHA256:AB:CD:... --voice
 //
 // It logs in as a guest unless --user is given (the password is then read from the
-// first line of standard input).
+// first line of standard input). With --voice it also checks that voice gets through
+// on the faster UDP path. Run it from outside the server's network to check that
+// people on the internet can reach the server.
+//
+// Exit codes: 0 reachable (and, with --voice, UDP works); 1 not reachable; 2 bad
+// arguments; 3 reachable, but voice has to use the main connection because UDP is blocked.
 
 #include <opentalk/sdk/Client.h>
 
@@ -44,7 +50,10 @@ int main(int argc, char *argv[])
     const QCommandLineOption guestOption(
         QStringLiteral("guest-name"), QStringLiteral("Nickname when logging in as a guest (default: opentalk-ping)."),
         QStringLiteral("name"), QStringLiteral("opentalk-ping"));
-    parser.addOptions({portOption, fingerprintOption, verboseOption, userOption, guestOption});
+    const QCommandLineOption voiceOption(QStringLiteral("voice"),
+                                         QStringLiteral("Also check that voice gets through on UDP (exit code 3 "
+                                                        "if only the slower fallback works)."));
+    parser.addOptions({portOption, fingerprintOption, verboseOption, userOption, guestOption, voiceOption});
     parser.process(app);
     if (!parser.isSet(verboseOption)) {
         QLoggingCategory::setFilterRules(QStringLiteral("opentalk.*=false"));
@@ -68,6 +77,33 @@ int main(int argc, char *argv[])
     opentalk::sdk::Client client;
     client.setApplication(QStringLiteral("opentalk-ping"), QStringLiteral("1.0"));
     int exitCode = 1;
+    const bool checkVoice = parser.isSet(voiceOption);
+    bool pinged = false;
+    bool voiceChecked = !checkVoice;
+    QTimer voiceTimeout;
+    voiceTimeout.setSingleShot(true);
+    voiceTimeout.setInterval(8000); // UDP is tried a few times before giving up
+    const auto finishIfDone = [&] {
+        if (pinged && voiceChecked) {
+            client.disconnectFromServer();
+        }
+    };
+    const auto reportVoice = [&](bool udp) {
+        if (voiceChecked) {
+            return;
+        }
+        voiceChecked = true;
+        voiceTimeout.stop();
+        if (udp) {
+            out << "Voice: UDP works\n";
+        } else {
+            out << "Voice: UDP does not get through, so voice uses the main connection (it works, with more "
+                   "delay). Check that the server's UDP port is open in its firewall and forwarded by its router.\n";
+            exitCode = 3;
+        }
+        out.flush();
+        finishIfDone();
+    };
 
     QObject::connect(&client, &opentalk::sdk::Client::connected, [&](const opentalk::sdk::ServerInfo &server) {
         out << "Connected to \"" << server.name << "\" (OpenTalk " << server.softwareVersion << ", protocol "
@@ -77,12 +113,27 @@ int main(int argc, char *argv[])
             << client.channels().size() << " channel(s) on the server\n";
         out.flush();
         client.ping();
+        if (checkVoice) {
+            voiceTimeout.start();
+            if (client.isAudioUsingUdp()) {
+                reportVoice(true);
+            }
+        }
     });
+    QObject::connect(&client, &opentalk::sdk::Client::audioPathChanged, [&](bool udp) {
+        if (udp) {
+            reportVoice(true);
+        }
+    });
+    QObject::connect(&voiceTimeout, &QTimer::timeout, [&] { reportVoice(client.isAudioUsingUdp()); });
     QObject::connect(&client, &opentalk::sdk::Client::pingReplied, [&](qint64 ms) {
         out << "Round trip: " << ms << " ms\n";
         out.flush();
-        exitCode = 0;
-        client.disconnectFromServer();
+        pinged = true;
+        if (exitCode == 1) {
+            exitCode = 0;
+        }
+        finishIfDone();
     });
     QObject::connect(&client, &opentalk::sdk::Client::disconnected, [&](const opentalk::sdk::DisconnectReason &r) {
         using Kind = opentalk::sdk::DisconnectReason::Kind;

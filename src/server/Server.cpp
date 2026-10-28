@@ -107,6 +107,9 @@ bool Server::start(QString *errorMessage)
     coreConfig.maxUsers = m_config.maxSessions;
     coreConfig.maxVoiceBitrate = m_config.voice.maxBitrate;
     coreConfig.auditRetentionDays = m_config.auditRetentionDays;
+    coreConfig.backupFolder = m_config.backupFolder;
+    coreConfig.backupIntervalHours = m_config.backupIntervalHours;
+    coreConfig.backupsToKeep = m_config.backupsToKeep;
     m_core = std::make_unique<ServerCore>(
         coreConfig, m_config.database, *m_passwords, [this] { return m_clock.elapsed(); },
         [] { return QDateTime::currentMSecsSinceEpoch(); });

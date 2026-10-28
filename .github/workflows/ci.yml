@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/vcpkg-cache
-          key: vcpkg-x64-windows-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-x64-windows-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg-overlay-ports/**') }}
 
       - name: Set up vcpkg at the pinned commit
         shell: pwsh
@@ -99,6 +99,22 @@ jobs:
           New-Item -ItemType File "$stage/OpenTalk.portable" | Out-Null
           Copy-Item LICENSE "$stage/LICENSE.txt"
           Copy-Item README.md "$stage/README.md"
+          # Licence notices for everything bundled: Qt and the code inside it, and the
+          # exact licence files vcpkg installed with the libraries that were built.
+          Copy-Item packaging/licenses/THIRD-PARTY-NOTICES.txt "$stage/THIRD-PARTY-NOTICES.txt"
+          New-Item -ItemType Directory -Force "$stage/licenses" | Out-Null
+          Copy-Item -Recurse packaging/licenses/qt "$stage/licenses/qt"
+          Copy-Item third_party/miniaudio/LICENSE "$stage/licenses/miniaudio.txt"
+          $share = "build/windows-msvc-release/vcpkg_installed/x64-windows/share"
+          foreach ($port in "openssl", "libsodium", "opus", "speexdsp") {
+            $file = "$share/$port/copyright"
+            if (-not (Test-Path $file)) { throw "vcpkg did not install a licence file for $port" }
+            Copy-Item $file "$stage/licenses/$port.txt"
+          }
+          # Every DLL in the package must be one the notices cover.
+          $known = '^(Qt6\w+|libssl-3-x64|libcrypto-3-x64|libsodium|opus|speexdsp|vcruntime140(_1)?|msvcp140(_\w+)?|concrt140|vccorlib140|q\w+|d3dcompiler_47|opengl32sw|dxcompiler|dxil)\.dll$'
+          $unknown = Get-ChildItem -Path $stage -Recurse -Filter *.dll | Where-Object { $_.Name -notmatch $known }
+          if ($unknown) { throw "DLLs without a licence notice: $($unknown.Name -join ', ')" }
 
       - name: Smoke-test the portable package
         shell: pwsh
@@ -116,6 +132,11 @@ jobs:
           $port = [regex]::Match($text, "running on port (\d+)").Groups[1].Value
           $fingerprint = [regex]::Match($text, "(SHA256:[0-9A-F:]+)").Groups[1].Value
           if (-not $port) { Stop-Process $server -ErrorAction SilentlyContinue; throw "packaged server did not start" }
+          # The package must carry a supported OpenSSL series (3.5 LTS, from vcpkg-overlay-ports).
+          if (-not ($text -match "TLS library: OpenSSL 3\.5\.")) {
+            Stop-Process $server -ErrorAction SilentlyContinue
+            throw "the packaged OpenSSL is not from the 3.5 LTS series"
+          }
           & "$stage/opentalk-ping.exe" 127.0.0.1 --port $port --fingerprint $fingerprint
           $code = $LASTEXITCODE
           Stop-Process $server
@@ -135,11 +156,53 @@ jobs:
           Write-Host $reply
           if (-not ($reply -match '"type":"ready"')) { throw "packaged dice plugin did not answer the handshake" }
 
+      - name: Build and test the installer
+        shell: pwsh
+        run: |
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "could not install NSIS" }
+          }
+          $version = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'VERSION (\d+\.\d+\.\d+)').Groups[1].Value
+          $setup = "$PWD\OpenTalk-$version-setup-x64.exe"
+          & $makensis /V2 "/DVERSION=$version" "/DSOURCE=$((Resolve-Path OpenTalk-portable).Path)" "/DOUTFILE=$setup" `
+            packaging/windows/opentalk.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          # Silent per-user install into a test folder, as a person without administrator rights would.
+          $dir = "$env:RUNNER_TEMP\OpenTalk-installed"
+          Start-Process -FilePath $setup -ArgumentList "/S", "/D=$dir" -Wait
+          foreach ($file in "OpenTalk.exe", "opentalk-server.exe", "THIRD-PARTY-NOTICES.txt", "licenses\openssl.txt",
+                            "tls\qopensslbackend.dll", "Uninstall OpenTalk.exe") {
+            if (-not (Test-Path "$dir\$file")) { throw "the installer did not install $file" }
+          }
+          if (Test-Path "$dir\OpenTalk.portable") { throw "the installed copy must not be in portable mode" }
+          $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenTalk"
+          if ((Get-ItemProperty $key).DisplayVersion -ne $version) { throw "the uninstall entry is missing" }
+          # The installed programs run with only Windows on PATH.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & "$dir\opentalk-server.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "the installed server does not start" }
+          # Uninstall (in place, so this waits for it) removes the program but leaves other files alone.
+          New-Item -ItemType File "$dir\keep-me.txt" | Out-Null
+          Start-Process -FilePath "$dir\Uninstall OpenTalk.exe" -ArgumentList "/S", "_?=$dir" -Wait
+          if (Test-Path "$dir\OpenTalk.exe") { throw "the uninstaller left OpenTalk.exe" }
+          if (-not (Test-Path "$dir\keep-me.txt")) { throw "the uninstaller deleted a file it did not install" }
+          if (Test-Path $key) { throw "the uninstaller left the uninstall entry" }
+          "SETUP=$setup" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Upload portable build
         uses: actions/upload-artifact@v4
         with:
           name: OpenTalk-portable-windows-x64
           path: OpenTalk-portable
+          retention-days: 14
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenTalk-setup-windows-x64
+          path: ${{ env.SETUP }}
           retention-days: 14
 
   linux:
@@ -193,3 +256,25 @@ jobs:
             "build/linux-fuzz/tests/fuzz/fuzz_$target" -max_total_time=60 "corpus/$target"
             echo "::endgroup::"
           done
+
+  docker:
+    name: Server container image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t opentalk-server:ci .
+
+      - name: Start a server, connect to it and stop it
+        run: |
+          docker run -d --name ot -v ot-data:/data opentalk-server:ci --allow-guests
+          for i in $(seq 30); do docker logs ot 2>&1 | grep -q "Press Ctrl+C" && break; sleep 1; done
+          docker logs ot
+          fingerprint=$(docker logs ot 2>&1 | grep -o 'SHA256:[0-9A-F:]*' | head -1)
+          docker exec ot opentalk-ping 127.0.0.1 --fingerprint "$fingerprint"
+          for i in $(seq 30); do docker exec ot opentalk-server --data-dir /data --list-backups | grep -q opentalk- && break; sleep 1; done
+          docker exec ot opentalk-server --data-dir /data --list-backups | grep opentalk-
+          docker stop ot
+          test "$(docker inspect ot --format '{{.State.ExitCode}}')" = 0
+          docker logs ot 2>&1 | tail -1 | grep Stopped

@@ -27,7 +27,8 @@ QJsonObject toJson(const ServerProfile &p)
             {QStringLiteral("port"), p.port},
             {QStringLiteral("guest"), p.guest},
             {QStringLiteral("userName"), p.userName},
-            {QStringLiteral("pinnedFingerprint"), p.pinnedFingerprint}};
+            {QStringLiteral("pinnedFingerprint"), p.pinnedFingerprint},
+            {QStringLiteral("rememberPassword"), p.rememberPassword}};
 }
 
 std::optional<ServerProfile> fromJson(const QJsonValue &value)
@@ -45,6 +46,7 @@ std::optional<ServerProfile> fromJson(const QJsonValue &value)
     p.guest = o.value(QStringLiteral("guest")).toBool(true);
     p.userName = o.value(QStringLiteral("userName")).toString();
     p.pinnedFingerprint = o.value(QStringLiteral("pinnedFingerprint")).toString();
+    p.rememberPassword = o.value(QStringLiteral("rememberPassword")).toBool(false);
     if (!ServerProfileStore::isValid(p)) {
         return std::nullopt;
     }

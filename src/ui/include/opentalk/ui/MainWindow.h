@@ -32,6 +32,7 @@ class PluginRegistry;
 
 namespace opentalk::storage {
 class AppPaths;
+class CredentialStore;
 class SettingsStore;
 } // namespace opentalk::storage
 
@@ -113,6 +114,9 @@ public:
     void setTrustPrompt(TrustPrompt prompt) { m_trustPrompt = std::move(prompt); }
     void setErrorReporter(ErrorReporter reporter) { m_errorReporter = std::move(reporter); }
     void setAnnouncementHook(std::function<void(const QString &)> hook) { m_announcementHook = std::move(hook); }
+    /// Replaces where remembered passwords are kept (tests use an in-memory store).
+    void setCredentialStore(std::unique_ptr<storage::CredentialStore> store);
+    storage::CredentialStore &credentialStore() { return *m_credentials; }
     /// Replaces the "choose a file to stream" dialog; returns the path, or empty to cancel.
     void setMediaFileChooser(std::function<QString()> chooser) { m_mediaFileChooser = std::move(chooser); }
 
@@ -172,6 +176,7 @@ private:
     QString channelPath(quint32 channelId) const;
 
     void onConnected();
+    void rememberPassword();
     void onDisconnected(const client::DisconnectInfo &info);
     void onConnectionLost(const client::DisconnectInfo &info, int attempt, int delayMs);
     void onTextReceived(const protocol::TextMessage &message);
@@ -212,6 +217,7 @@ private:
     ErrorReporter m_errorReporter;
     std::function<void(const QString &)> m_announcementHook;
     std::function<QString()> m_mediaFileChooser;
+    std::unique_ptr<storage::CredentialStore> m_credentials;
     AnnouncementQueue *m_announcements = nullptr;
     QTimer m_refreshTimer;
 

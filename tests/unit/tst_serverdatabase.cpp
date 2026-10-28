@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "opentalk/server/ServerDatabase.h"
 
+#include <QDir>
 #include <QFile>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -218,6 +219,80 @@ private slots:
         next.action = QStringLiteral("after.prune");
         QVERIFY(db.appendAudit(next));
         QVERIFY(db.verifyAudit().intact);
+    }
+
+    void backupWhileInUseAndCheck()
+    {
+        ServerDatabase db;
+        QVERIFY(db.open(path(QStringLiteral("live.db"))));
+        QVERIFY(db.createAccount(QStringLiteral("alice"), QByteArray("hash-a"), protocol::Role::Owner));
+        // A second connection (as from another process) writes while the backup is taken.
+        ServerDatabase other;
+        QVERIFY(other.open(path(QStringLiteral("live.db"))));
+        QVERIFY(other.createAccount(QStringLiteral("bob"), QByteArray("hash-b"), protocol::Role::User));
+
+        const QString backup = path(QStringLiteral("backups/copy.db"));
+        QVERIFY(QDir().mkpath(path(QStringLiteral("backups"))));
+        QString error;
+        QVERIFY2(db.backupTo(backup, &error), qPrintable(error));
+        QVERIFY(!QFile::exists(backup + QStringLiteral(".partial")));
+        QCOMPARE(ServerDatabase::checkBackup(backup, &error), std::optional<int>(ServerDatabase::kSchemaVersion));
+        // Later changes are not in it; replacing it works.
+        QVERIFY(db.createAccount(QStringLiteral("carol"), QByteArray("hash-c"), protocol::Role::User));
+        ServerDatabase copy;
+        QVERIFY(copy.open(backup));
+        QCOMPARE(copy.accounts().size(), 2);
+        QVERIFY(copy.findAccount(QStringLiteral("bob")).has_value());
+        copy.close();
+        QVERIFY(db.backupTo(backup, &error));
+        QVERIFY(copy.open(backup));
+        QCOMPARE(copy.accounts().size(), 3);
+        copy.close();
+        // A file name with a quote in it is not a problem.
+        QVERIFY2(db.backupTo(path(QStringLiteral("it's.db")), &error), qPrintable(error));
+        QVERIFY(ServerDatabase::checkBackup(path(QStringLiteral("it's.db"))).has_value());
+    }
+
+    void badBackupsAreRefused()
+    {
+        QString error;
+        QVERIFY(!ServerDatabase::checkBackup(path(QStringLiteral("missing.db")), &error));
+        QVERIFY(error.contains(QStringLiteral("does not exist")));
+
+        QFile text(path(QStringLiteral("notes.db")));
+        QVERIFY(text.open(QIODevice::WriteOnly));
+        text.write("these are not the files you are looking for");
+        text.close();
+        QVERIFY(!ServerDatabase::checkBackup(text.fileName(), &error));
+        QVERIFY(error.contains(QStringLiteral("not an OpenTalk database")));
+
+        {
+            // Another program's SQLite database.
+            QSqlDatabase foreign = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("foreign"));
+            foreign.setDatabaseName(path(QStringLiteral("foreign.db")));
+            QVERIFY(foreign.open());
+            QSqlQuery(foreign).exec(QStringLiteral("CREATE TABLE notes (text TEXT)"));
+            foreign.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("foreign"));
+        QVERIFY(!ServerDatabase::checkBackup(path(QStringLiteral("foreign.db")), &error));
+        QVERIFY(error.contains(QStringLiteral("not an OpenTalk database")));
+
+        // A damaged copy: valid header, garbage after it.
+        ServerDatabase db;
+        QVERIFY(db.open(path(QStringLiteral("source.db"))));
+        for (int i = 0; i < 200; ++i) {
+            QVERIFY(db.createAccount(QStringLiteral("user%1").arg(i), QByteArray(64, 'h'), protocol::Role::User));
+        }
+        QVERIFY(db.backupTo(path(QStringLiteral("damaged.db"))));
+        db.close();
+        QFile damaged(path(QStringLiteral("damaged.db")));
+        QVERIFY(damaged.open(QIODevice::ReadWrite));
+        QVERIFY(damaged.size() > 8192);
+        damaged.seek(4096);
+        damaged.write(QByteArray(4096, '\xA5'));
+        damaged.close();
+        QVERIFY(!ServerDatabase::checkBackup(damaged.fileName(), &error));
     }
 };
 

@@ -51,6 +51,10 @@ public:
         int minPasswordLength = 8;
         /// Audit entries older than this are removed at start-up (0 keeps everything).
         int auditRetentionDays = 365; ///< 0 keeps the audit log forever.
+        /// Automatic backups of the database into this folder (empty: none).
+        QString backupFolder;
+        int backupIntervalHours = 24;
+        int backupsToKeep = 7;
     };
 
     /// Live numbers only the network layer knows, for the statistics request.
@@ -179,6 +183,8 @@ private:
     void reloadPermissions();
     /// Removes audit entries older than the retention period (at start-up, then daily).
     void pruneAuditLog();
+    /// Writes an automatic backup when the configured interval has passed.
+    void backupIfDue();
     QList<protocol::RoleInfo> roleInfos() const;
     void audit(const Client *actor, const QString &action, const QString &target, quint32 channelId = 0,
                const QString &reason = {}, const QString &details = {});
@@ -223,6 +229,7 @@ private:
     quint64 m_nextMemoryId = 1;
     moderation::AuditVerification m_auditStatus;
     qint64 m_lastAuditPruneMs = 0;
+    qint64 m_lastBackupMs = -1; ///< Wall-clock time of the newest backup; -1 until looked up.
     protocol::ServerSettingsInfo m_settings;
     StatsProvider m_statsProvider;
     qint64 m_startedMs = 0;

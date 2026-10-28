@@ -7,6 +7,7 @@
 #include "opentalk/plugins/PluginRegistry.h"
 #include "opentalk/storage/AppPaths.h"
 #include "opentalk/storage/ClientSettings.h"
+#include "opentalk/storage/CredentialStore.h"
 #include "opentalk/storage/SettingsStore.h"
 #include "opentalk/ui/AdminDialog.h"
 #include "opentalk/ui/AnnouncementQueue.h"
@@ -23,6 +24,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -35,7 +37,9 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSplitter>
+#include <QSslSocket>
 #include <QStatusBar>
+#include <QUrl>
 #include <QVBoxLayout>
 
 namespace opentalk::ui {
@@ -165,6 +169,7 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
         return box.clickedButton() == trust;
     };
     m_errorReporter = [this](const QString &title, const QString &text) { QMessageBox::warning(this, title, text); };
+    m_credentials = storage::createSystemCredentialStore();
 
     // Connection events.
     connect(&m_connection, &client::Connection::stateChanged, this, &MainWindow::updateActions);
@@ -858,11 +863,26 @@ void MainWindow::buildMenus()
                               "<p>Open-source, self-hosted voice and text communication.</p>"
                               "<p>Copyright the OpenTalk contributors. OpenTalk is free software, licensed under the "
                               "GNU General Public License version 3 only. It comes with no warranty.</p>"
-                              "<p>Source code: <a href=\"https://github.com/donovanmalisch23-alt/OpenTalk\">"
-                              "github.com/donovanmalisch23-alt/OpenTalk</a></p>"
+                              "<p>Source code: <a href=\"https://github.com/donovanmalisch23-alt/opentalk\">"
+                              "github.com/donovanmalisch23-alt/opentalk</a></p>"
+                              "<p>Uses Qt %4, %5, libsodium, Opus, speexdsp and miniaudio. Their licences are "
+                              "listed under Help, Third-party notices.</p>"
                               "<p>Data folder (%2 mode): %3</p>")
                                .arg(QStringLiteral(OPENTALK_VERSION_STRING), storage::toString(m_paths.mode()),
-                                    QDir::toNativeSeparators(m_paths.dataRoot()).toHtmlEscaped()));
+                                    QDir::toNativeSeparators(m_paths.dataRoot()).toHtmlEscaped(),
+                                    QString::fromLatin1(qVersion()),
+                                    QSslSocket::sslLibraryVersionString().toHtmlEscaped()));
+    });
+    helpMenu->addAction(tr("Third-party &notices"), this, [this] {
+        const QString notices = QCoreApplication::applicationDirPath() + QStringLiteral("/THIRD-PARTY-NOTICES.txt");
+        if (QFileInfo::exists(notices) && QDesktopServices::openUrl(QUrl::fromLocalFile(notices))) {
+            return;
+        }
+        QMessageBox::information(
+            this, tr("Third-party notices"),
+            tr("The notices are in THIRD-PARTY-NOTICES.txt and the licenses folder of the OpenTalk download, and at "
+               "https://github.com/donovanmalisch23-alt/opentalk/blob/main/packaging/licenses/"
+               "THIRD-PARTY-NOTICES.txt"));
     });
     helpMenu->addAction(tr("About &Qt"), qApp, &QApplication::aboutQt);
 }
@@ -989,7 +1009,7 @@ QString MainWindow::channelPath(quint32 channelId) const
 
 void MainWindow::openConnectDialog()
 {
-    ConnectDialog dialog(m_profiles, this);
+    ConnectDialog dialog(m_profiles, m_credentials.get(), this);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
@@ -1146,8 +1166,30 @@ void MainWindow::stopLocalServer()
     m_localServer.stop();
 }
 
+void MainWindow::setCredentialStore(std::unique_ptr<storage::CredentialStore> store)
+{
+    m_credentials = std::move(store);
+}
+
+void MainWindow::rememberPassword()
+{
+    // Only after the server accepted it, so a mistyped password is never remembered.
+    if (!m_profile || !m_saveProfile || m_profile->guest || m_profile->id.isEmpty()) {
+        return;
+    }
+    if (!m_profile->rememberPassword) {
+        m_credentials->removePassword(m_profile->id);
+        return;
+    }
+    QString error;
+    if (!m_credentials->writePassword(m_profile->id, m_profile->userName, m_password, &error)) {
+        appendHistory(tr("Your password could not be remembered: %1.").arg(error));
+    }
+}
+
 void MainWindow::onConnected()
 {
+    rememberPassword();
     const client::ClientState &state = m_connection.serverState();
     setWindowTitle(tr("%1 - OpenTalk").arg(serverDisplayName()));
     refreshViews();

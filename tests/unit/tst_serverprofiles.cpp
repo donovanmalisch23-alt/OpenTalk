@@ -24,6 +24,7 @@ private:
         p.guest = false;
         p.userName = QStringLiteral("alice");
         p.pinnedFingerprint = QStringLiteral("SHA256:AA");
+        p.rememberPassword = true;
         return p;
     }
 
@@ -49,6 +50,7 @@ private slots:
         ServerProfile p = *reloaded.find(id);
         QCOMPARE(p.userName, QStringLiteral("alice"));
         QVERIFY(!p.guest);
+        QVERIFY(p.rememberPassword); // the choice is kept; the password itself is not
         p.name = QStringLiteral("Renamed");
         QCOMPARE(reloaded.upsert(p), id);
         QCOMPARE(reloaded.profiles().size(), 1);

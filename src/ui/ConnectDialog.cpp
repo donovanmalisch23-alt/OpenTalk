@@ -2,6 +2,7 @@
 #include "opentalk/ui/ConnectDialog.h"
 
 #include "opentalk/protocol/Messages.h"
+#include "opentalk/storage/CredentialStore.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -39,9 +40,11 @@ void complain(QWidget *parent, QWidget *field, const QString &message)
 
 } // namespace
 
-ConnectDialog::ConnectDialog(storage::ServerProfileStore &profiles, QWidget *parent)
+ConnectDialog::ConnectDialog(storage::ServerProfileStore &profiles, storage::CredentialStore *credentials,
+                             QWidget *parent)
     : QDialog(parent)
     , m_profiles(profiles)
+    , m_credentials(credentials != nullptr && credentials->isAvailable() ? credentials : nullptr)
 {
     setWindowTitle(tr("Connect to a server"));
 
@@ -66,9 +69,18 @@ ConnectDialog::ConnectDialog(storage::ServerProfileStore &profiles, QWidget *par
     m_password = new QLineEdit;
     m_password->setEchoMode(QLineEdit::Password);
     m_password->setAccessibleName(tr("Password"));
-    m_password->setAccessibleDescription(tr("Not saved. You are asked for it each time you connect."));
+    m_password->setAccessibleDescription(m_credentials != nullptr
+                                             ? tr("Not saved unless you tick \"Remember my password\".")
+                                             : tr("Not saved. You are asked for it each time you connect."));
     m_save = new QCheckBox(tr("&Save this server in the list"));
     m_save->setChecked(true);
+    m_remember = new QCheckBox(tr("&Remember my password"));
+    m_remember->setAccessibleDescription(
+        m_credentials != nullptr
+            ? tr("Kept in %1, protected by your sign-in, on this computer only. Never in OpenTalk's own files.")
+                  .arg(m_credentials->name())
+            : QString());
+    m_remember->setVisible(m_credentials != nullptr);
 
     auto *form = new QFormLayout;
     form->addRow(buddyLabel(tr("Server &name:"), m_name), m_name);
@@ -79,6 +91,7 @@ ConnectDialog::ConnectDialog(storage::ServerProfileStore &profiles, QWidget *par
     form->addRow(m_userLabel, m_user);
     form->addRow(buddyLabel(tr("&Password:"), m_password), m_password);
     form->addRow(QString(), m_save);
+    form->addRow(QString(), m_remember);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
     QPushButton *connectButton = buttons->addButton(tr("&Connect"), QDialogButtonBox::AcceptRole);
@@ -102,6 +115,7 @@ ConnectDialog::ConnectDialog(storage::ServerProfileStore &profiles, QWidget *par
     layout->addWidget(buttons);
 
     connect(m_loginMode, &QComboBox::currentIndexChanged, this, &ConnectDialog::updateLoginFields);
+    connect(m_save, &QCheckBox::toggled, this, &ConnectDialog::updateLoginFields);
     connect(m_saved, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *item) {
         const QString id = item != nullptr ? item->data(kProfileIdRole).toString() : QString();
         if (const auto profile = m_profiles.find(id)) {
@@ -142,6 +156,12 @@ void ConnectDialog::fillFrom(const storage::ServerProfile &p)
     m_loginMode->setCurrentIndex(p.guest ? 0 : 1);
     m_user->setText(p.userName);
     m_password->clear();
+    m_remember->setChecked(p.rememberPassword);
+    if (p.rememberPassword && m_credentials != nullptr) {
+        if (const auto password = m_credentials->readPassword(p.id)) {
+            m_password->setText(*password);
+        }
+    }
     m_delete->setEnabled(true);
     updateLoginFields();
 }
@@ -155,6 +175,7 @@ void ConnectDialog::clearForm()
     m_loginMode->setCurrentIndex(0);
     m_user->clear();
     m_password->clear();
+    m_remember->setChecked(false);
     m_delete->setEnabled(false);
     updateLoginFields();
 }
@@ -165,6 +186,7 @@ void ConnectDialog::updateLoginFields()
     m_userLabel->setText(account ? tr("&Username:") : tr("&Nickname:"));
     m_user->setAccessibleName(account ? tr("Username") : tr("Nickname"));
     m_password->setEnabled(account);
+    m_remember->setEnabled(account && m_save->isChecked());
 }
 
 void ConnectDialog::deleteSelected()
@@ -177,6 +199,9 @@ void ConnectDialog::deleteSelected()
         QMessageBox::question(this, tr("Delete saved server"),
                               tr("Remove \"%1\" from your saved servers?").arg(profile->name)) != QMessageBox::Yes) {
         return;
+    }
+    if (m_credentials != nullptr) {
+        m_credentials->removePassword(m_editingId);
     }
     m_profiles.remove(m_editingId);
     m_profiles.save();
@@ -226,6 +251,7 @@ ConnectDialog::Choice ConnectDialog::choice() const
     }
     c.password = c.profile.guest ? QString() : m_password->text();
     c.save = m_save->isChecked();
+    c.profile.rememberPassword = m_credentials != nullptr && c.save && !c.profile.guest && m_remember->isChecked();
     return c;
 }
 

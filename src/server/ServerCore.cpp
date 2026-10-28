@@ -2,11 +2,14 @@
 #include "opentalk/server/ServerCore.h"
 
 #include "opentalk/logging/Logging.h"
+#include "opentalk/server/Backups.h"
 #include "opentalk/server/PasswordWorker.h"
 #include "opentalk/server/ServerDatabase.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QRandomGenerator>
+#include <QTimeZone>
 
 #include <algorithm>
 
@@ -207,12 +210,39 @@ void ServerCore::pruneAuditLog()
     }
 }
 
+void ServerCore::backupIfDue()
+{
+    if (m_database == nullptr || m_config.backupFolder.isEmpty() || m_config.backupIntervalHours <= 0) {
+        return;
+    }
+    const qint64 now = m_wallClock();
+    if (m_lastBackupMs < 0) {
+        const QList<BackupFile> existing = listBackups(m_config.backupFolder);
+        m_lastBackupMs = existing.isEmpty() ? 0 : existing.first().time.toMSecsSinceEpoch();
+    }
+    if (now - m_lastBackupMs < static_cast<qint64>(m_config.backupIntervalHours) * 3600 * 1000) {
+        return;
+    }
+    m_lastBackupMs = now; // also after a failure, so a broken disk is not retried every second
+    QString error;
+    const auto path =
+        writeBackup(*m_database, m_config.backupFolder, QDateTime::fromMSecsSinceEpoch(now, QTimeZone::utc()), &error);
+    if (!path) {
+        qCWarning(lcServer).noquote() << "Automatic backup failed:" << error;
+        return;
+    }
+    const int removed = pruneBackups(m_config.backupFolder, m_config.backupsToKeep);
+    qCInfo(lcServer).noquote() << "Backed up the database to" << QDir::toNativeSeparators(*path)
+                               << (removed > 0 ? QStringLiteral("(removed %1 older backups)").arg(removed) : QString());
+}
+
 void ServerCore::tick()
 {
     constexpr qint64 kDayMs = 24LL * 3600 * 1000;
     if (m_wallClock() - m_lastAuditPruneMs >= kDayMs) {
         pruneAuditLog();
     }
+    backupIfDue();
     const QList<moderation::Sanction> expired = m_sanctions.expire(m_wallClock());
     for (const moderation::Sanction &sanction : expired) {
         updateSanction(sanction);

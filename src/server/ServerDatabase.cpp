@@ -121,6 +121,79 @@ void ServerDatabase::close()
     }
 }
 
+bool ServerDatabase::backupTo(const QString &path, QString *errorMessage) const
+{
+    if (!isOpen()) {
+        return setError(errorMessage, QStringLiteral("the database is not open"));
+    }
+    const QString target = QFileInfo(path).absoluteFilePath();
+    const QString partial = target + QStringLiteral(".partial");
+    QFile::remove(partial);
+    QSqlQuery q(QSqlDatabase::database(m_connectionName, false));
+    QString quoted = partial;
+    quoted.replace(QLatin1Char('\''), QStringLiteral("''"));
+    if (!q.exec(QStringLiteral("VACUUM INTO '%1'").arg(quoted))) {
+        QFile::remove(partial);
+        return setError(errorMessage, QStringLiteral("cannot write %1: %2").arg(path, q.lastError().text()));
+    }
+    QFile::remove(target);
+    if (!QFile::rename(partial, target)) {
+        QFile::remove(partial);
+        return setError(errorMessage, QStringLiteral("cannot create %1").arg(path));
+    }
+    return true;
+}
+
+std::optional<int> ServerDatabase::checkBackup(const QString &path, QString *errorMessage)
+{
+    const auto fail = [errorMessage](const QString &message) -> std::optional<int> {
+        setError(errorMessage, message);
+        return std::nullopt;
+    };
+    if (!QFileInfo(path).isFile()) {
+        return fail(QStringLiteral("%1 does not exist").arg(path));
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.read(16) != QByteArray("SQLite format 3\0", 16)) {
+        return fail(QStringLiteral("%1 is not an OpenTalk database").arg(path));
+    }
+    file.close();
+    const QString name = QStringLiteral("opentalk-backup-check-%1").arg(g_connectionCounter.fetchAndAddRelaxed(1));
+    std::optional<int> result;
+    QString problem;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), name);
+        db.setDatabaseName(path);
+        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+        if (!db.open()) {
+            problem = QStringLiteral("cannot open %1: %2").arg(path, db.lastError().text());
+        } else {
+            QSqlQuery q(db);
+            if (!q.exec(QStringLiteral("PRAGMA integrity_check")) || !q.next() ||
+                q.value(0).toString() != QLatin1String("ok")) {
+                problem = QStringLiteral("%1 is damaged (SQLite's integrity check failed)").arg(path);
+            } else if (!q.exec(QStringLiteral("SELECT count(*) FROM accounts")) || !q.next()) {
+                problem = QStringLiteral("%1 is not an OpenTalk database").arg(path);
+            } else if (!q.exec(QStringLiteral("PRAGMA user_version")) || !q.next()) {
+                problem = QStringLiteral("cannot read the version of %1").arg(path);
+            } else if (const int version = q.value(0).toInt(); version > kSchemaVersion) {
+                problem = QStringLiteral("%1 comes from a newer OpenTalk (database version %2; this one knows %3)")
+                              .arg(path)
+                              .arg(version)
+                              .arg(kSchemaVersion);
+            } else {
+                result = version;
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(name);
+    if (!result) {
+        return fail(problem);
+    }
+    return result;
+}
+
 bool ServerDatabase::open(const QString &path, QString *errorMessage)
 {
     close();

@@ -53,6 +53,17 @@ public:
     bool open(const QString &path, QString *errorMessage = nullptr);
     void close();
     bool isOpen() const;
+    QString path() const { return m_path; }
+
+    /// Writes a consistent copy of the whole database to `path` with SQLite's
+    /// VACUUM INTO. It is safe while the server is running, even from another process.
+    /// The copy is written next to `path` first and then renamed, so a half-written
+    /// backup never has the final name. An existing file at `path` is replaced.
+    bool backupTo(const QString &path, QString *errorMessage = nullptr) const;
+    /// Checks that a file is a usable OpenTalk backup: SQLite, passes SQLite's integrity
+    /// check, has OpenTalk's tables and comes from this or an older OpenTalk. Returns its
+    /// schema version.
+    static std::optional<int> checkBackup(const QString &path, QString *errorMessage = nullptr);
 
     /// Usernames: 1-32 characters from A-Z, a-z, 0-9, '.', '_' and '-'. Restricting the
     /// alphabet avoids look-alike names that differ only in invisible or similar letters.

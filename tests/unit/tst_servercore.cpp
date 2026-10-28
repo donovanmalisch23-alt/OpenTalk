@@ -4,6 +4,12 @@
 
 #include "ServerCoreHarness.h"
 
+#include "opentalk/server/Backups.h"
+
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
+
 using namespace opentalk;
 using namespace opentalk::protocol;
 using namespace opentalk::server;
@@ -15,6 +21,41 @@ class TestServerCore : public QObject {
 
 private slots:
     void initTestCase() { QVERIFY(security::initializePasswordHashing()); }
+
+    void automaticBackupsFollowTheSchedule()
+    {
+        QTemporaryDir folder;
+        ServerCore::Config config = Harness::guestsAllowed();
+        config.backupFolder = folder.filePath(QStringLiteral("backups"));
+        config.backupIntervalHours = 24;
+        config.backupsToKeep = 2;
+        Harness h(config);
+        h.core->tick(); // none yet: one is made straight away
+        QCOMPARE(listBackups(config.backupFolder).size(), 1);
+        h.wall += 23LL * 3600 * 1000;
+        h.core->tick();
+        QCOMPARE(listBackups(config.backupFolder).size(), 1); // not due yet
+        for (int day = 0; day < 3; ++day) {
+            h.wall += 25LL * 3600 * 1000;
+            h.core->tick();
+        }
+        const QList<BackupFile> backups = listBackups(config.backupFolder);
+        QCOMPARE(backups.size(), 2); // only the newest two are kept
+        QCOMPARE(backups.first().time.toMSecsSinceEpoch() / 1000, h.wall / 1000);
+        QVERIFY(ServerDatabase::checkBackup(backups.first().path).has_value());
+        // Files that are not automatic backups are left alone.
+        QFile keep(QDir(config.backupFolder).filePath(QStringLiteral("before-restore-20260101-000000.db")));
+        QVERIFY(keep.open(QIODevice::WriteOnly));
+        keep.close();
+        QCOMPARE(pruneBackups(config.backupFolder, 1), 1);
+        QVERIFY(keep.exists());
+
+        // A restarted server counts from the newest backup on disk, not from zero.
+        Harness restarted(config);
+        restarted.wall = h.wall + 3600 * 1000;
+        restarted.core->tick();
+        QCOMPARE(listBackups(config.backupFolder).size(), 1);
+    }
 
     // ----------------------------------------------------------------------- login
 

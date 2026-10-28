@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Server runtime (no GUI dependencies) and the headless opentalk-server program.
 add_library(opentalk_server STATIC
+    include/opentalk/server/Backups.h
     include/opentalk/server/Server.h
     include/opentalk/server/ServerDatabase.h
     include/opentalk/server/ServerCore.h
     include/opentalk/server/PasswordWorker.h
     include/opentalk/server/VoiceRouter.h
+    Backups.cpp
     Server.cpp
     ServerDatabase.cpp
     ServerCore.cpp

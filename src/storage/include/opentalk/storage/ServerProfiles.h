@@ -9,8 +9,8 @@
 
 namespace opentalk::storage {
 
-/// A saved server. Passwords are never stored here; until secure storage (Windows
-/// Credential Manager) is added, the app asks for them when connecting.
+/// A saved server. Passwords are never stored here: if the user chooses to remember
+/// one, it goes to the operating system's credential store (see CredentialStore).
 struct ServerProfile {
     QString id; ///< Stable random identifier.
     QString name;
@@ -20,6 +20,8 @@ struct ServerProfile {
     QString userName; ///< Account username, or guest nickname.
     /// Certificate fingerprint the user trusted (empty until the first connection).
     QString pinnedFingerprint;
+    /// The user asked to remember the password (kept in the credential store, by `id`).
+    bool rememberPassword = false;
 
     friend bool operator==(const ServerProfile &, const ServerProfile &) = default;
 };

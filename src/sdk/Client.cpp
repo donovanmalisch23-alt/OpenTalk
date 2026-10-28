@@ -279,6 +279,7 @@ Client::Client(QObject *parent)
                 emit userUpdated(toSdk(u, d->connection.serverState()));
             });
     connect(&c, &client::Connection::voiceReady, this, &Client::audioReady);
+    connect(&c, &client::Connection::voicePathChanged, this, &Client::audioPathChanged);
     connect(&c, &client::Connection::audioReceived, this,
             [this](const protocol::AudioData &a) { emit audioReceived(a.userId, toSdk(a.stream), a.payload); });
     connect(&state, &client::ClientState::textReceived, this, [this](const protocol::TextMessage &m) {
@@ -396,6 +397,11 @@ quint64 Client::sendServerMessage(const QString &text)
 bool Client::isAudioReady() const
 {
     return d->connection.isVoiceReady();
+}
+
+bool Client::isAudioUsingUdp() const
+{
+    return d->connection.isVoiceUsingUdp();
 }
 
 bool Client::sendAudio(const QByteArray &opusPacket, AudioStream stream)

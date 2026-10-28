@@ -3,6 +3,10 @@
 
 #include "opentalk/storage/ServerProfiles.h"
 
+namespace opentalk::storage {
+class CredentialStore;
+}
+
 #include <QDialog>
 
 class QCheckBox;
@@ -24,10 +28,12 @@ class ConnectDialog : public QDialog {
     Q_OBJECT
 
 public:
-    ConnectDialog(storage::ServerProfileStore &profiles, QWidget *parent = nullptr);
+    /// `credentials` (may be null) is where remembered passwords are read from.
+    ConnectDialog(storage::ServerProfileStore &profiles, storage::CredentialStore *credentials = nullptr,
+                  QWidget *parent = nullptr);
 
     struct Choice {
-        storage::ServerProfile profile;
+        storage::ServerProfile profile; ///< `rememberPassword` says whether to keep the password.
         QString password;
         bool save = true;
     };
@@ -46,6 +52,7 @@ private:
     bool validate();
 
     storage::ServerProfileStore &m_profiles;
+    storage::CredentialStore *m_credentials = nullptr;
     QString m_editingId;
 
     QListWidget *m_saved = nullptr;
@@ -57,6 +64,7 @@ private:
     QLineEdit *m_user = nullptr;
     QLineEdit *m_password = nullptr;
     QCheckBox *m_save = nullptr;
+    QCheckBox *m_remember = nullptr;
     QPushButton *m_delete = nullptr;
 };
 
