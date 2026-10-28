@@ -62,11 +62,13 @@ private slots:
             Authenticate{Authenticate::Mode::Account, QStringLiteral("alice"), QStringLiteral("p \u00e4ss\nword")});
         QTest::newRow("authenticate guest")
             << Message(Authenticate{Authenticate::Mode::Guest, QStringLiteral("Nova"), QString()});
-        QTest::newRow("auth result") << Message(AuthResult{7, QStringLiteral("alice"), Role::Admin});
+        QTest::newRow("auth result") << Message(
+            AuthResult{7, QStringLiteral("alice"), Role::Admin, {1, 2, 33}, {30, 32}});
         const ChannelInfo root{kRootChannelId, 0, QString(), QString(), true, false, 0};
         const ChannelInfo lobby{1000, kRootChannelId, QStringLiteral("Lobby"), QStringLiteral("Hi"), true, true, 10};
         const UserInfo alice{7, QStringLiteral("alice"), Role::User, 1000};
-        QTest::newRow("snapshot") << Message(StateSnapshot{{root, lobby}, {alice}});
+        const RoleInfo moderator{4, QStringLiteral("Moderator"), 50, {1, 33}, true};
+        QTest::newRow("snapshot") << Message(StateSnapshot{{root, lobby}, {alice}, {moderator}});
         QTest::newRow("empty snapshot") << Message(StateSnapshot{});
         QTest::newRow("channel added") << Message(ChannelAdded{lobby});
         QTest::newRow("channel removed") << Message(ChannelRemoved{1000});
@@ -188,8 +190,11 @@ private slots:
             << typeOf(MessageType::Authenticate) << cbor({{1, 1}, {2, QStringLiteral(" Nova")}});
         QTest::newRow("auth result user 0")
             << typeOf(MessageType::AuthResult) << cbor({{1, 0}, {2, QStringLiteral("x")}, {3, 1}});
-        QTest::newRow("unknown role") << typeOf(MessageType::UserJoined)
-                                      << cbor({{1, 5}, {2, QStringLiteral("x")}, {3, 3}, {4, 1}});
+        // Any role ID is valid (servers define their own roles), but it must be a number.
+        QTest::newRow("negative role") << typeOf(MessageType::UserJoined)
+                                       << cbor({{1, 5}, {2, QStringLiteral("x")}, {3, -1}, {4, 1}});
+        QTest::newRow("role as text") << typeOf(MessageType::UserJoined)
+                                      << cbor({{1, 5}, {2, QStringLiteral("x")}, {3, QStringLiteral("admin")}, {4, 1}});
         const auto channel = [](qint64 id, qint64 parent, const QString &name) {
             return QCborMap{{1, id}, {2, parent}, {3, name}, {4, QString()}, {5, true}, {6, false}, {7, 0}};
         };

@@ -90,6 +90,11 @@ public:
     quint64 createChannel(const protocol::CreateChannel &request); ///< requestId is filled in.
     quint64 deleteChannel(quint32 channelId);
     quint64 sendText(protocol::TextTarget target, quint32 targetId, const QString &text);
+    /// Sends any request message (moderation, administration, EditChannel ...): its
+    /// requestId is filled in and returned. The answer arrives through requestFinished(),
+    /// or through responseReceived() for requests answered with data (lists, the audit
+    /// log, settings, statistics).
+    quint64 sendRequest(protocol::Message request);
 
     /// Sends a ping to measure the round-trip time; the result arrives through
     /// roundTripMeasured(). Returns false if not connected or a ping is in flight.
@@ -123,6 +128,9 @@ signals:
     void requestFinished(quint64 requestId, const std::optional<opentalk::protocol::Error> &error,
                          std::optional<quint32> resultId);
     void roundTripMeasured(qint64 milliseconds);
+    /// The data answering a request: ListResult, AuditPage, ServerSettingsResult or
+    /// ServerStatsResult.
+    void responseReceived(quint64 requestId, const opentalk::protocol::Message &response);
     /// Voice is set up (after each login) and audio can be sent.
     void voiceReady();
     void voicePathChanged(bool usingUdp);
@@ -142,7 +150,7 @@ private:
     void onSessionClosed(const protocol::CloseInfo &info);
     void onApplicationMessage(const protocol::Message &message);
     void onServerError(const protocol::Error &error);
-    quint64 sendRequest(protocol::Message message, quint64 requestId);
+    quint64 sendRequestWithId(protocol::Message message, quint64 requestId);
     quint64 nextRequestId() { return m_nextRequestId++; }
 
     ConnectionState m_state = ConnectionState::Disconnected;

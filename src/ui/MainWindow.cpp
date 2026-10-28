@@ -5,11 +5,13 @@
 #include "opentalk/storage/AppPaths.h"
 #include "opentalk/storage/ClientSettings.h"
 #include "opentalk/storage/SettingsStore.h"
+#include "opentalk/ui/AdminDialog.h"
 #include "opentalk/ui/AnnouncementQueue.h"
 #include "opentalk/ui/AudioController.h"
 #include "opentalk/ui/AudioDialogs.h"
 #include "opentalk/ui/ChannelTree.h"
 #include "opentalk/ui/ConnectDialog.h"
+#include "opentalk/ui/ModerationDialogs.h"
 #include "opentalk/ui/SettingsDialog.h"
 
 #include <QAccessible>
@@ -36,7 +38,25 @@ namespace {
 constexpr int kPaneCount = 4;
 constexpr int kUserIdRole = Qt::UserRole;
 using Category = AnnouncementQueue::Category;
+using moderation::Capability;
+using moderation::SanctionType;
 using protocol::Role;
+
+QAction *separator(QObject *parent)
+{
+    auto *action = new QAction(parent);
+    action->setSeparator(true);
+    return action;
+}
+
+/// "you were kicked: spam" -> "You were kicked: spam".
+QString sentence(QString text)
+{
+    if (!text.isEmpty()) {
+        text[0] = text[0].toUpper();
+    }
+    return text;
+}
 
 /// Wraps `content` with a visible heading label that is also its accessible label.
 QWidget *labelledPane(const QString &heading, QWidget *content)
@@ -144,6 +164,21 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
     connect(&state, &client::ClientState::reset, this, &MainWindow::scheduleRefresh);
     connect(&state, &client::ClientState::channelAdded, this, &MainWindow::scheduleRefresh);
     connect(&state, &client::ClientState::channelRemoved, this, &MainWindow::scheduleRefresh);
+    connect(&state, &client::ClientState::channelUpdated, this, [this](const protocol::ChannelInfo &channel) {
+        scheduleRefresh();
+        if (channel.id == m_connection.serverState().currentChannelId()) {
+            appendHistory(channel.topic.isEmpty()
+                              ? tr("Your channel was changed: it is now %1.").arg(channelPath(channel.id))
+                              : tr("Your channel was changed: it is now %1, topic: %2.")
+                                    .arg(channelPath(channel.id), channel.topic));
+        }
+    });
+    connect(&state, &client::ClientState::userUpdated, this, &MainWindow::onUserUpdated);
+    connect(&state, &client::ClientState::rolesChanged, this, &MainWindow::scheduleRefresh);
+    connect(&state, &client::ClientState::capabilitiesChanged, this, &MainWindow::updateActions);
+    connect(&state, &client::ClientState::sanctionNotice, this, &MainWindow::onSanctionNotice);
+    // Which moderation actions apply depends on the focused list and its selection.
+    connect(qApp, &QApplication::focusChanged, this, &MainWindow::updateActions);
     connect(&state, &client::ClientState::userJoined, this, [this](const protocol::UserInfo &user) {
         scheduleRefresh();
         appendHistory(tr("%1 joined the server.").arg(user.name));
@@ -201,6 +236,7 @@ MainWindow::~MainWindow()
     QObject::disconnect(&m_connection, nullptr, this, nullptr);
     QObject::disconnect(&m_connection.serverState(), nullptr, this, nullptr);
     QObject::disconnect(&m_localServer, nullptr, this, nullptr);
+    QObject::disconnect(qApp, nullptr, this, nullptr);
     if (m_audio != nullptr) {
         QObject::disconnect(m_audio, nullptr, this, nullptr);
     }
@@ -349,6 +385,7 @@ void MainWindow::buildCentralArea()
 
     m_userList = new QListWidget;
     m_userList->setAccessibleName(tr("Users"));
+    connect(m_userList, &QListWidget::currentItemChanged, this, &MainWindow::updateActions);
     connect(m_userList, &QListWidget::itemActivated, this,
             [this](QListWidgetItem *item) { sendPrivateMessage(item->data(kUserIdRole).toUInt()); });
 
@@ -409,6 +446,8 @@ void MainWindow::buildMenus()
     m_hostAction =
         serverMenu->addAction(tr("&Host a server on this computer..."), this, &MainWindow::openLocalServerDialog);
     m_stopHostingAction = serverMenu->addAction(tr("&Stop hosting"), this, &MainWindow::stopLocalServer);
+    serverMenu->addSeparator();
+    m_broadcastAction = serverMenu->addAction(tr("Send a message to &everyone..."), this, &MainWindow::sendBroadcast);
 
     QMenu *channelMenu = menuBar()->addMenu(tr("Cha&nnel"));
     m_joinAction = channelMenu->addAction(tr("&Join selected channel"), this, [this] {
@@ -418,6 +457,7 @@ void MainWindow::buildMenus()
     });
     m_createChannelAction = channelMenu->addAction(tr("&Create channel..."), this, &MainWindow::createChannel);
     m_createChannelAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
+    m_editChannelAction = channelMenu->addAction(tr("&Edit channel..."), this, &MainWindow::editSelectedChannel);
     m_deleteChannelAction = channelMenu->addAction(tr("&Delete channel..."), this, &MainWindow::deleteSelectedChannel);
     channelMenu->addSeparator();
     m_privateMessageAction = channelMenu->addAction(tr("Send &private message..."), this, [this] {
@@ -432,11 +472,49 @@ void MainWindow::buildMenus()
     m_privateMessageAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
     m_userVolumeAction = channelMenu->addAction(tr("&Volume for selected user..."), this, &MainWindow::openUserVolume);
     m_userVolumeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+
+    // Mnemonics avoid the pane labels (Alt+C, S, M, U) and the other menus.
+    QMenu *moderationMenu = menuBar()->addMenu(tr("M&oderation"));
+    const auto moderate = [this](SanctionType type) { return [this, type] { moderateSelectedUser(type); }; };
+    m_warnAction = moderationMenu->addAction(tr("&Warn selected user..."), this, moderate(SanctionType::Warning));
+    m_muteUserAction = moderationMenu->addAction(tr("M&ute selected user..."), this, moderate(SanctionType::Mute));
+    m_kickAction = moderationMenu->addAction(tr("&Kick selected user..."), this, moderate(SanctionType::Kick));
+    m_banAction = moderationMenu->addAction(tr("&Ban selected user..."), this, moderate(SanctionType::Ban));
+    m_moveUserAction = moderationMenu->addAction(tr("Mo&ve selected user..."), this, &MainWindow::moveSelectedUser);
+    moderationMenu->addSeparator();
+    m_reportAction = moderationMenu->addAction(tr("&Report selected user..."), this, &MainWindow::reportSelectedUser);
+    m_mySanctionsAction =
+        moderationMenu->addAction(tr("My &sanctions and appeals..."), this, &MainWindow::openMySanctions);
+    moderationMenu->addSeparator();
+    m_adminAction = moderationMenu->addAction(tr("&Administration..."), this, &MainWindow::openAdministration);
+    m_adminAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
+    const QList<std::pair<QAction *, const char *>> named = {
+        {m_editChannelAction, "editChannelAction"},
+        {m_broadcastAction, "broadcastAction"},
+        {m_warnAction, "warnAction"},
+        {m_muteUserAction, "muteUserAction"},
+        {m_kickAction, "kickAction"},
+        {m_banAction, "banAction"},
+        {m_moveUserAction, "moveUserAction"},
+        {m_reportAction, "reportAction"},
+        {m_mySanctionsAction, "mySanctionsAction"},
+        {m_adminAction, "adminAction"},
+        {m_deleteChannelAction, "deleteChannelAction"},
+        {m_createChannelAction, "createChannelAction"},
+    };
+    for (const auto &[action, name] : named) {
+        action->setObjectName(QLatin1String(name));
+    }
+
     // The same actions are the channel tree's context menu (Shift+F10 or the Menu key).
-    m_channelTree->addActions(
-        {m_joinAction, m_createChannelAction, m_deleteChannelAction, m_privateMessageAction, m_userVolumeAction});
+    const QList<QAction *> userActions = {m_warnAction, m_muteUserAction, m_kickAction,
+                                          m_banAction,  m_moveUserAction, m_reportAction};
+    m_channelTree->addActions({m_joinAction, m_createChannelAction, m_editChannelAction, m_deleteChannelAction,
+                               separator(this), m_privateMessageAction, m_userVolumeAction, separator(this)});
+    m_channelTree->addActions(userActions);
     m_userList->setContextMenuPolicy(Qt::ActionsContextMenu);
-    m_userList->addActions({m_privateMessageAction, m_userVolumeAction});
+    m_userList->addActions({m_privateMessageAction, m_userVolumeAction, separator(this)});
+    m_userList->addActions(userActions);
 
     QMenu *audioMenu = menuBar()->addMenu(tr("&Audio"));
     m_transmitAction =
@@ -596,6 +674,9 @@ QString MainWindow::serverDisplayName() const
 
 QString MainWindow::userName(quint32 userId) const
 {
+    if (userId == 0) {
+        return tr("the server");
+    }
     const auto user = m_connection.serverState().user(userId);
     return user ? user->name : tr("(someone who left)");
 }
@@ -686,16 +767,27 @@ void MainWindow::startLocalServer(const LocalServerDialog::Choice &choice)
     setStatusText(tr("Preparing your server..."));
     const QString dataDir = m_paths.dataRoot() + QStringLiteral("/servers/local");
     QDir().mkpath(dataDir);
-    m_localServer.createAccount(m_localServerExecutable, dataDir, choice.adminName, choice.adminPassword, true,
-                                [this, choice](const QString &error) {
-                                    // An existing account is fine: you are logging in to it again.
-                                    if (!error.isEmpty() && !error.contains(QStringLiteral("already exists"))) {
-                                        setStatusText(tr("Your server could not start."));
-                                        reportError(tr("Could not host a server"),
-                                                    tr("Could not create the administrator account: %1.").arg(error));
+    // The person hosting owns the server. If it already has an owner (hosted before under
+    // another name), the new account becomes an administrator instead.
+    const auto finish = [this, choice](const QString &error) {
+        // An existing account is fine: you are logging in to it again.
+        if (!error.isEmpty() && !error.contains(QStringLiteral("already exists"))) {
+            setStatusText(tr("Your server could not start."));
+            reportError(tr("Could not host a server"),
+                        tr("Could not create the administrator account: %1.").arg(error));
+            return;
+        }
+        launchLocalServer(choice);
+    };
+    m_localServer.createAccount(m_localServerExecutable, dataDir, choice.adminName, choice.adminPassword,
+                                QStringLiteral("owner"), [this, choice, dataDir, finish](const QString &error) {
+                                    if (error.contains(QStringLiteral("already has an owner"))) {
+                                        m_localServer.createAccount(m_localServerExecutable, dataDir, choice.adminName,
+                                                                    choice.adminPassword, QStringLiteral("admin"),
+                                                                    finish);
                                         return;
                                     }
-                                    launchLocalServer(choice);
+                                    finish(error);
                                 });
 }
 
@@ -774,6 +866,7 @@ void MainWindow::onDisconnected(const client::DisconnectInfo &info)
     m_channelTree->showMessage(tr("Not connected to a server"));
     m_userList->clear();
     m_requestDescriptions.clear();
+    m_requestSuccesses.clear();
     using Reason = client::DisconnectInfo::Reason;
     switch (info.reason) {
     case Reason::UserRequested:
@@ -794,6 +887,13 @@ void MainWindow::onDisconnected(const client::DisconnectInfo &info)
         reportError(tr("Cannot connect"), tr("This server uses a different version of the OpenTalk protocol."));
         return;
     case Reason::ServerClosed:
+        if (info.protocolCode == protocol::ErrorCode::Kicked || info.protocolCode == protocol::ErrorCode::Banned) {
+            setStatusText(tr("Not connected"));
+            reportError(info.protocolCode == protocol::ErrorCode::Kicked ? tr("Kicked") : tr("Banned"),
+                        tr("Disconnected from %1. %2.").arg(serverDisplayName(), sentence(info.detail)));
+            return;
+        }
+        [[fallthrough]];
     case Reason::ProtocolError:
     case Reason::Timeout:
     case Reason::NetworkError:
@@ -858,7 +958,8 @@ void MainWindow::refreshViews()
     for (const protocol::UserInfo &user : state.users()) {
         const QString label =
             tr("%1, in %2")
-                .arg(ChannelTree::userLabel(user.name, user.id == state.selfId(), static_cast<int>(user.role)),
+                .arg(ChannelTree::userLabel(user.name, user.id == state.selfId(),
+                                            ChannelTree::roleLabel(state, static_cast<quint32>(user.role)), user.flags),
                      channelPath(user.channelId));
         auto *item = new QListWidgetItem(label, m_userList);
         item->setData(kUserIdRole, user.id);
@@ -874,19 +975,43 @@ void MainWindow::refreshViews()
 
 void MainWindow::updateActions()
 {
+    if (m_adminAction == nullptr) {
+        return; // still building the window
+    }
     const bool connected = m_connection.state() == client::ConnectionState::Connected;
     const bool active = m_connection.state() != client::ConnectionState::Disconnected;
-    const Role role = m_connection.serverState().selfRole();
+    const client::ClientState &state = m_connection.serverState();
     const auto channelId = m_channelTree->currentChannelId();
+    const bool realChannel = channelId && *channelId != protocol::kRootChannelId;
+    const auto userId = selectedUserId();
+    const bool otherUser = connected && userId && *userId != state.selfId() && state.user(*userId);
+    // Moderation actions appear only for people who may use them (here or in some channel);
+    // the server still decides each case.
+    const auto offer = [connected](QAction *action, bool allowed, bool applicable) {
+        action->setVisible(connected && allowed);
+        action->setEnabled(connected && allowed && applicable);
+    };
     m_disconnectAction->setEnabled(active);
     m_hostAction->setEnabled(m_localServer.state() == client::LocalServer::State::Stopped);
     m_stopHostingAction->setEnabled(m_localServer.state() == client::LocalServer::State::Running);
     m_joinAction->setEnabled(connected && channelId.has_value());
-    m_createChannelAction->setEnabled(connected && role != Role::Guest);
-    m_deleteChannelAction->setEnabled(connected && role == Role::Admin && channelId &&
-                                      *channelId != protocol::kRootChannelId);
+    m_createChannelAction->setEnabled(connected && (state.canSomewhere(Capability::ChannelCreateTemporary) ||
+                                                    state.canSomewhere(Capability::ChannelCreatePersistent)));
+    m_editChannelAction->setEnabled(connected && realChannel && state.canSomewhere(Capability::ChannelEdit));
+    m_deleteChannelAction->setEnabled(connected && realChannel && state.canSomewhere(Capability::ChannelDelete));
     m_privateMessageAction->setEnabled(connected);
     m_userVolumeAction->setEnabled(connected);
+    offer(m_broadcastAction, state.can(Capability::BroadcastSend), true);
+    offer(m_warnAction, state.canSomewhere(Capability::UserWarn), otherUser);
+    offer(m_muteUserAction, state.canSomewhere(Capability::UserMute), otherUser);
+    offer(m_kickAction, state.canSomewhere(Capability::UserKick), otherUser);
+    offer(m_banAction,
+          state.canSomewhere(Capability::UserBanTemporary) || state.canSomewhere(Capability::UserBanPermanent),
+          otherUser);
+    offer(m_moveUserAction, state.canSomewhere(Capability::UserMove), otherUser);
+    offer(m_adminAction, state.canModerate(), true);
+    m_reportAction->setEnabled(otherUser);
+    m_mySanctionsAction->setEnabled(connected);
 }
 
 // ------------------------------------------------------------------- requests
@@ -900,7 +1025,7 @@ void MainWindow::joinChannel(quint32 channelId)
         return;
     }
     QString password;
-    if (channel->hasPassword && state.selfRole() != Role::Admin) {
+    if (channel->hasPassword && !state.can(Capability::ChannelBypassRestrictions)) {
         bool ok = false;
         password =
             QInputDialog::getText(this, tr("Channel password"), tr("Password for %1:").arg(channelPath(channelId)),
@@ -916,7 +1041,7 @@ void MainWindow::joinChannel(quint32 channelId)
 void MainWindow::createChannel()
 {
     const client::ClientState &state = m_connection.serverState();
-    if (m_connection.state() != client::ConnectionState::Connected || state.selfRole() == Role::Guest) {
+    if (m_connection.state() != client::ConnectionState::Connected || !m_createChannelAction->isEnabled()) {
         return;
     }
     // Create inside the selected channel when it can have sub-channels, else at the top.
@@ -926,7 +1051,7 @@ void MainWindow::createChannel()
             parentId = *selected;
         }
     }
-    CreateChannelDialog dialog(channelPath(parentId), state.selfRole() == Role::Admin, this);
+    CreateChannelDialog dialog(channelPath(parentId), state.canSomewhere(Capability::ChannelCreatePersistent), this);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
@@ -994,10 +1119,27 @@ void MainWindow::handleMessageInput()
     m_messageInput->clear();
 }
 
+void MainWindow::track(quint64 id, const QString &failure, const QString &success)
+{
+    if (id == 0) {
+        setStatusText(tr("%1: you are not connected.").arg(failure));
+        return;
+    }
+    m_requestDescriptions.insert(id, failure);
+    if (!success.isEmpty()) {
+        m_requestSuccesses.insert(id, success);
+    }
+}
+
 void MainWindow::onRequestFinished(quint64 requestId, const std::optional<protocol::Error> &error)
 {
     const QString description = m_requestDescriptions.take(requestId);
+    const QString success = m_requestSuccesses.take(requestId);
     if (!error) {
+        if (!success.isEmpty()) {
+            appendHistory(success);
+            setStatusText(success);
+        }
         return;
     }
     const QString text =
@@ -1024,6 +1166,10 @@ QString MainWindow::friendlyError(const protocol::Error &error)
         return tr("that channel or user no longer exists.");
     case ErrorCode::Timeout:
         return tr("the connection was lost.");
+    case ErrorCode::Muted:
+        return error.detail.isEmpty() ? tr("you are muted.") : error.detail + QLatin1Char('.');
+    case ErrorCode::Banned:
+        return error.detail.isEmpty() ? tr("you are banned there.") : error.detail + QLatin1Char('.');
     default:
         return error.detail.isEmpty() ? protocol::toString(error.code) : error.detail + QLatin1Char('.');
     }
@@ -1047,7 +1193,9 @@ void MainWindow::onTextReceived(const protocol::TextMessage &message)
         spoken = line;
         break;
     case protocol::TextTarget::Server:
-        line = tr("Server message from %1: %2").arg(sender, message.text);
+        // From user 0: the server itself, for example its welcome message.
+        line = message.fromUserId == 0 ? tr("Server: %1").arg(message.text)
+                                       : tr("Message to everyone from %1: %2").arg(sender, message.text);
         spoken = line;
         break;
     }
@@ -1057,6 +1205,211 @@ void MainWindow::onTextReceived(const protocol::TextMessage &message)
         playSound(message.target == protocol::TextTarget::Channel ? audio::EventSound::ChannelMessage
                   : message.target == protocol::TextTarget::User  ? audio::EventSound::PrivateMessage
                                                                   : audio::EventSound::ServerMessage);
+    }
+}
+
+// ------------------------------------------------------------------ moderation
+
+void MainWindow::moderateSelectedUser(SanctionType type)
+{
+    const client::ClientState &state = m_connection.serverState();
+    const auto userId = selectedUserId();
+    const auto user = userId ? state.user(*userId) : std::nullopt;
+    if (m_connection.state() != client::ConnectionState::Connected || !user || user->id == state.selfId()) {
+        return;
+    }
+    SanctionDialog::Options options;
+    options.targetName = user->name;
+    options.type = type;
+    options.channelId = user->channelId;
+    options.channelName = channelPath(user->channelId);
+    options.canBanAddress = state.can(Capability::UserBanAddress);
+    options.canBanPermanently = state.can(Capability::UserBanPermanent);
+    SanctionDialog dialog(options, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    protocol::ApplySanction request = dialog.request();
+    request.userId = user->id;
+    QString done;
+    switch (static_cast<SanctionType>(request.type)) {
+    case SanctionType::Warning:
+        done = tr("You warned %1.");
+        break;
+    case SanctionType::VoiceMute:
+        done = tr("You muted the voice of %1.");
+        break;
+    case SanctionType::TextMute:
+        done = tr("You muted the messages of %1.");
+        break;
+    case SanctionType::Mute:
+        done = tr("You muted %1.");
+        break;
+    case SanctionType::Kick:
+        done = tr("You kicked %1.");
+        break;
+    case SanctionType::Ban:
+        done = tr("You banned %1.");
+        break;
+    case SanctionType::Restrict:
+        done = tr("You restricted %1.");
+        break;
+    }
+    track(m_connection.sendRequest(request),
+          tr("Could not give %1 a %2").arg(user->name, sanctionTypeName(request.type).toLower()), done.arg(user->name));
+}
+
+void MainWindow::moveSelectedUser()
+{
+    const client::ClientState &state = m_connection.serverState();
+    const auto userId = selectedUserId();
+    const auto user = userId ? state.user(*userId) : std::nullopt;
+    if (m_connection.state() != client::ConnectionState::Connected || !user) {
+        return;
+    }
+    QList<QPair<quint32, QString>> channels;
+    for (const protocol::ChannelInfo &channel : state.channels()) {
+        channels.append({channel.id, channelPath(channel.id)});
+    }
+    ChannelPickerDialog dialog(tr("Move %1").arg(user->name), tr("&Move %1 to:").arg(user->name), channels,
+                               user->channelId, this);
+    if (dialog.exec() != QDialog::Accepted || dialog.channelId() == 0 || dialog.channelId() == user->channelId) {
+        return;
+    }
+    const quint32 target = dialog.channelId();
+    track(m_connection.sendRequest(protocol::MoveUser{0, user->id, target}), tr("Could not move %1").arg(user->name),
+          tr("You moved %1 to %2.").arg(user->name, channelPath(target)));
+}
+
+void MainWindow::reportSelectedUser()
+{
+    const client::ClientState &state = m_connection.serverState();
+    const auto userId = selectedUserId();
+    const auto user = userId ? state.user(*userId) : std::nullopt;
+    if (m_connection.state() != client::ConnectionState::Connected || !user || user->id == state.selfId()) {
+        return;
+    }
+    ReportDialog dialog(user->name, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    track(m_connection.sendRequest(protocol::ReportUser{0, user->id, dialog.reason()}),
+          tr("Could not report %1").arg(user->name),
+          tr("Your report about %1 was sent to the moderators.").arg(user->name));
+}
+
+void MainWindow::editSelectedChannel()
+{
+    const auto channelId = m_channelTree->currentChannelId();
+    const auto channel = channelId ? m_connection.serverState().channel(*channelId) : std::nullopt;
+    if (m_connection.state() != client::ConnectionState::Connected || !channel ||
+        channel->id == protocol::kRootChannelId) {
+        return;
+    }
+    EditChannelDialog dialog(*channel, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const protocol::EditChannel request = dialog.request();
+    track(m_connection.sendRequest(request), tr("Could not change %1").arg(channelPath(channel->id)),
+          tr("Saved the changes to %1.").arg(request.name));
+}
+
+void MainWindow::openMySanctions()
+{
+    if (m_connection.state() != client::ConnectionState::Connected) {
+        return;
+    }
+    MySanctionsDialog dialog(m_connection, this);
+    dialog.exec();
+}
+
+void MainWindow::openAdministration()
+{
+    if (m_connection.state() != client::ConnectionState::Connected || !m_connection.serverState().canModerate()) {
+        return;
+    }
+    AdminDialog dialog(m_connection, this);
+    connect(&dialog, &AdminDialog::statusChanged, this, &MainWindow::setStatusText);
+    dialog.exec();
+}
+
+void MainWindow::sendBroadcast()
+{
+    if (m_connection.state() != client::ConnectionState::Connected ||
+        !m_connection.serverState().can(Capability::BroadcastSend)) {
+        return;
+    }
+    bool ok = false;
+    const QString text = QInputDialog::getText(this, tr("Message to everyone"),
+                                               tr("Message to everyone on %1:").arg(serverDisplayName()),
+                                               QLineEdit::Normal, QString(), &ok);
+    if (!ok || text.trimmed().isEmpty()) {
+        return;
+    }
+    const quint64 id = m_connection.sendText(protocol::TextTarget::Server, 0, text);
+    if (id == 0) {
+        setStatusText(tr("Message not sent: it contains characters that cannot be sent."));
+        return;
+    }
+    track(id, tr("Message to everyone not sent"));
+}
+
+void MainWindow::onSanctionNotice(const protocol::SanctionInfo &sanction)
+{
+    const auto type = static_cast<SanctionType>(sanction.type);
+    const QString kind = sanctionTypeName(sanction.type).toLower();
+    QString text;
+    switch (static_cast<moderation::SanctionState>(sanction.state)) {
+    case moderation::SanctionState::Active:
+        text =
+            tr("%1, from %2.")
+                .arg(describeSanction(sanction, sanction.channelId != 0 ? channelPath(sanction.channelId) : QString()),
+                     sanction.actorName.isEmpty() ? tr("the server") : sanction.actorName);
+        if (!sanction.reason.isEmpty()) {
+            text += tr(" Reason: %1.").arg(sanction.reason);
+        }
+        if (type != SanctionType::Kick) {
+            text += tr(" To appeal, use Moderation, My sanctions and appeals.");
+        }
+        break;
+    case moderation::SanctionState::Expired:
+        text = tr("Your %1 has ended.").arg(kind);
+        break;
+    case moderation::SanctionState::Revoked:
+        text = sanction.resolvedBy.isEmpty() ? tr("Your %1 was lifted.").arg(kind)
+                                             : tr("Your %1 was lifted by %2.").arg(kind, sanction.resolvedBy);
+        break;
+    case moderation::SanctionState::Overturned:
+        text = tr("Your %1 was overturned on appeal.").arg(kind);
+        break;
+    }
+    appendHistory(text);
+    setStatusText(text);
+    playSound(audio::EventSound::ServerMessage);
+}
+
+void MainWindow::onUserUpdated(const protocol::UserInfo &user, const protocol::UserInfo &before)
+{
+    scheduleRefresh();
+    const client::ClientState &state = m_connection.serverState();
+    if (user.id == state.selfId()) {
+        if (user.role != before.role) {
+            const QString role = ChannelTree::roleLabel(state, static_cast<quint32>(user.role));
+            const QString text =
+                role.isEmpty() ? tr("You are now a registered user.") : tr("You are now %1.").arg(role);
+            appendHistory(text);
+            setStatusText(text);
+        }
+        return;
+    }
+    if (user.channelId != state.currentChannelId()) {
+        return;
+    }
+    const bool mutedBefore = (before.flags & protocol::VoiceMutedFlag) != 0;
+    const bool mutedNow = (user.flags & protocol::VoiceMutedFlag) != 0;
+    if (mutedBefore != mutedNow) {
+        appendHistory(mutedNow ? tr("%1 was muted.").arg(user.name) : tr("%1 can talk again.").arg(user.name));
     }
 }
 

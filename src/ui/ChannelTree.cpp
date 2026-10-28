@@ -46,18 +46,47 @@ QString ChannelTree::channelLabel(const QString &name, int userCount, bool hasPa
     return label;
 }
 
-QString ChannelTree::userLabel(const QString &name, bool isSelf, int role)
+QString ChannelTree::userLabel(const QString &name, bool isSelf, const QString &role, quint32 flags)
 {
     QString label = name;
     if (isSelf) {
         label += tr(" (you)");
     }
-    if (role == static_cast<int>(protocol::Role::Admin)) {
-        label += tr(", administrator");
-    } else if (role == static_cast<int>(protocol::Role::Guest)) {
-        label += tr(", guest");
+    if (!role.isEmpty()) {
+        label += tr(", %1").arg(role);
+    }
+    const bool voiceMuted = (flags & protocol::VoiceMutedFlag) != 0;
+    const bool textMuted = (flags & protocol::TextMutedFlag) != 0;
+    if (voiceMuted && textMuted) {
+        label += tr(", muted");
+    } else if (voiceMuted) {
+        label += tr(", voice muted");
+    } else if (textMuted) {
+        label += tr(", text muted");
+    }
+    if ((flags & protocol::RestrictedFlag) != 0) {
+        label += tr(", restricted");
     }
     return label;
+}
+
+QString ChannelTree::roleLabel(const client::ClientState &state, quint32 roleId)
+{
+    switch (static_cast<protocol::Role>(roleId)) {
+    case protocol::Role::User:
+        return QString();
+    case protocol::Role::Guest:
+        return tr("guest");
+    case protocol::Role::Admin:
+        return tr("administrator");
+    case protocol::Role::Owner:
+        return tr("owner");
+    case protocol::Role::Moderator:
+        return tr("moderator");
+    case protocol::Role::Restricted:
+        return tr("restricted");
+    }
+    return state.roleName(roleId); // a role the server's owner made
 }
 
 void ChannelTree::showMessage(const QString &text)
@@ -98,8 +127,9 @@ void ChannelTree::rebuild(const client::ClientState &state, const QString &serve
         }
         channelItems.insert(channel.id, item);
         for (const protocol::UserInfo &user : members) {
-            auto *userItem = new QTreeWidgetItem(
-                item, {userLabel(user.name, user.id == state.selfId(), static_cast<int>(user.role))});
+            auto *userItem =
+                new QTreeWidgetItem(item, {userLabel(user.name, user.id == state.selfId(),
+                                                     roleLabel(state, static_cast<quint32>(user.role)), user.flags)});
             userItem->setData(0, kKindRole, static_cast<int>(ItemKind::User));
             userItem->setData(0, kIdRole, user.id);
             if (m_talking.contains(user.id)) {

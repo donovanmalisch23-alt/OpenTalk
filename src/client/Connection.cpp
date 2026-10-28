@@ -9,6 +9,7 @@
 #include <QSslSocket>
 
 #include <algorithm>
+#include <type_traits>
 
 namespace opentalk::client {
 
@@ -247,6 +248,25 @@ void Connection::onApplicationMessage(const protocol::Message &message)
         m_voice.receiveTunnel(*audio);
         return;
     }
+    // Data answers to requests.
+    const std::optional<quint64> answered = std::visit(
+        [](const auto &m) -> std::optional<quint64> {
+            using T = std::decay_t<decltype(m)>;
+            if constexpr (std::is_same_v<T, protocol::ListResult> || std::is_same_v<T, protocol::AuditPage> ||
+                          std::is_same_v<T, protocol::ServerSettingsResult> ||
+                          std::is_same_v<T, protocol::ServerStatsResult>) {
+                return m.requestId;
+            } else {
+                return std::nullopt;
+            }
+        },
+        message);
+    if (answered) {
+        if (m_pendingRequests.remove(*answered)) {
+            emit responseReceived(*answered, message);
+        }
+        return;
+    }
     if (const auto *setup = std::get_if<protocol::AudioSetup>(&message)) {
         m_voice.start(*setup, m_socket ? m_socket->peerAddress() : QHostAddress(), m_options.allowUdp);
         emit voiceReady();
@@ -305,7 +325,7 @@ void Connection::onSessionClosed(const CloseInfo &info)
     m_pendingFailure = result;
 }
 
-quint64 Connection::sendRequest(protocol::Message message, quint64 requestId)
+quint64 Connection::sendRequestWithId(protocol::Message message, quint64 requestId)
 {
     if (m_state != ConnectionState::Connected || !m_session) {
         return 0;
@@ -318,20 +338,20 @@ quint64 Connection::sendRequest(protocol::Message message, quint64 requestId)
 quint64 Connection::joinChannel(quint32 channelId, const QString &password)
 {
     const quint64 id = nextRequestId();
-    return sendRequest(protocol::JoinChannel{id, channelId, password}, id);
+    return sendRequestWithId(protocol::JoinChannel{id, channelId, password}, id);
 }
 
 quint64 Connection::createChannel(const protocol::CreateChannel &request)
 {
     protocol::CreateChannel copy = request;
     copy.requestId = nextRequestId();
-    return sendRequest(copy, copy.requestId);
+    return sendRequestWithId(copy, copy.requestId);
 }
 
 quint64 Connection::deleteChannel(quint32 channelId)
 {
     const quint64 id = nextRequestId();
-    return sendRequest(protocol::DeleteChannel{id, channelId}, id);
+    return sendRequestWithId(protocol::DeleteChannel{id, channelId}, id);
 }
 
 quint64 Connection::sendText(protocol::TextTarget target, quint32 targetId, const QString &text)
@@ -340,7 +360,23 @@ quint64 Connection::sendText(protocol::TextTarget target, quint32 targetId, cons
         return 0;
     }
     const quint64 id = nextRequestId();
-    return sendRequest(protocol::SendText{id, target, targetId, text}, id);
+    return sendRequestWithId(protocol::SendText{id, target, targetId, text}, id);
+}
+
+quint64 Connection::sendRequest(protocol::Message request)
+{
+    const quint64 id = nextRequestId();
+    const bool isRequest = std::visit(
+        [id](auto &m) {
+            if constexpr (requires { m.requestId = quint64{0}; }) {
+                m.requestId = id;
+                return true;
+            } else {
+                return false;
+            }
+        },
+        request);
+    return isRequest ? sendRequestWithId(std::move(request), id) : 0;
 }
 
 bool Connection::measureRoundTrip()

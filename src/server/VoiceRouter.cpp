@@ -14,7 +14,7 @@ using protocol::AudioData;
 using protocol::VoicePacketKind;
 using security::PacketDirection;
 
-VoiceRouter::VoiceRouter(Config config, std::function<QList<quint32>(quint32)> recipients,
+VoiceRouter::VoiceRouter(Config config, std::function<QList<quint32>(quint32, protocol::AudioStream)> recipients,
                          std::function<qint64()> nowMs, QObject *parent)
     : QObject(parent)
     , m_config(config)
@@ -153,7 +153,7 @@ void VoiceRouter::forward(Peer &sender, AudioData audio)
 {
     // The speaker is whoever owns the keys, never what the packet claims.
     audio.userId = sender.sessionId;
-    const QList<quint32> recipients = m_recipients(sender.sessionId);
+    const QList<quint32> recipients = m_recipients(sender.sessionId, audio.stream);
     if (recipients.isEmpty()) {
         return;
     }

@@ -46,7 +46,8 @@ enum class ClientState {
     Reconnecting, ///< The connection was lost; the SDK is trying again.
 };
 
-enum class Role { Guest, User, Admin };
+/// Built-in roles; `Custom` covers roles a server defines itself (see User::roleId).
+enum class Role { Guest, User, Admin, Owner, Moderator, Restricted, Custom };
 
 struct Channel {
     quint32 id = 0;

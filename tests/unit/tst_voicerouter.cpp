@@ -53,7 +53,7 @@ private:
     std::unique_ptr<VoiceRouter> makeRouter(VoiceRouter::Config config = {})
     {
         return std::make_unique<VoiceRouter>(
-            config, [this](quint32 id) { return m_channelOf.value(id); }, [this] { return m_now; });
+            config, [this](quint32 id, AudioStream) { return m_channelOf.value(id); }, [this] { return m_now; });
     }
 
 private slots:

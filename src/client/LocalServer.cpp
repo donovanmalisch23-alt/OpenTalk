@@ -76,7 +76,7 @@ void LocalServer::setState(State state)
 }
 
 void LocalServer::createAccount(const QString &executable, const QString &dataDir, const QString &userName,
-                                const QString &password, bool admin, std::function<void(const QString &)> done)
+                                const QString &password, const QString &role, std::function<void(const QString &)> done)
 {
     auto *process = new QProcess(this);
     process->setProcessChannelMode(QProcess::MergedChannels);
@@ -98,7 +98,7 @@ void LocalServer::createAccount(const QString &executable, const QString &dataDi
         }
     });
     process->start(executable, {QStringLiteral("--data-dir"), dataDir, QStringLiteral("--create-account"), userName,
-                                QStringLiteral("--role"), admin ? QStringLiteral("admin") : QStringLiteral("user")});
+                                QStringLiteral("--role"), role});
     // The password goes through a pipe, never the command line (which other users of the
     // computer can see).
     process->write(password.toUtf8() + '\n');

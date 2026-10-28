@@ -260,7 +260,8 @@ void benchRouter()
         server::VoiceRouter::Config config;
         config.packetsPerSecond = 1e9; // measure the forwarding path, not the flood limit
         config.packetBurst = 1e9;
-        server::VoiceRouter router(config, [recipients](quint32) { return recipients; }, [] { return qint64(0); });
+        server::VoiceRouter router(
+            config, [recipients](quint32, protocol::AudioStream) { return recipients; }, [] { return qint64(0); });
         security::PacketSealer speaker;
         for (quint32 id = 1; id <= static_cast<quint32>(listeners + 1); ++id) {
             const protocol::AudioSetup setup = router.addSession(id, 10350);

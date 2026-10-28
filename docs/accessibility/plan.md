@@ -39,15 +39,22 @@ Qt exposes widgets to screen readers through **UI Automation** on Windows. Stand
 | Ctrl+D | Disconnect |
 | Enter (channel tree) | Join the selected channel, or send a private message to the selected user |
 | Enter (users list) | Send a private message to the selected user |
-| Shift+F10 or Menu key (channel tree) | Channel actions: join, create, delete, private message |
+| Shift+F10 or Menu key (channel tree, users list) | Actions for the selected channel or person: join, create, edit, delete, private message, volume, and the moderation actions the user may use |
 | Ctrl+N | Create a channel |
 | Ctrl+P | Private message to the selected user |
 | Enter (message box) | Send to your channel |
 | F4 | Settings |
+| Push-to-talk key (chosen in Settings → Audio; global on Windows) | Talk while held |
+| Ctrl+T | Talk on or off |
+| Ctrl+M | Mute or unmute the microphone |
+| Ctrl+Shift+M | Mute or unmute everything you hear |
+| Ctrl+Shift+V | Volume for the selected person |
+| Ctrl+Shift+A | Administration (moderators and administrators) |
+| Ctrl+Tab / Ctrl+Shift+Tab, F5 (Administration) | Next / previous tab; reload the tab |
 | Ctrl+Q | Exit |
-| Alt+F, Alt+R, Alt+N, Alt+V, Alt+H | File, Server, Channel, View and Help menus |
+| Alt+F, Alt+R, Alt+N, Alt+A, Alt+O, Alt+V, Alt+H | File, Server, Channel, Audio, Moderation, View and Help menus |
 
-Menu mnemonics deliberately avoid the pane labels' Alt+C, Alt+S, Alt+M and Alt+U. Planned: a configurable global push-to-talk key, and shortcuts for mute and deafen. Each will be added to this table, and shortcut conflicts will be checked.
+Menu mnemonics deliberately avoid the pane labels' Alt+C, Alt+S, Alt+M and Alt+U. New shortcuts are added to this table and checked for conflicts.
 
 ## Design rules for contributors
 

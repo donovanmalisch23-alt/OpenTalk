@@ -191,9 +191,15 @@ private slots:
         alice.talk(30);
         QTRY_COMPARE_WITH_TIMEOUT(bob.heard.size(), 30, kWaitMs);
         bob.talk(30, 100);
-        QTRY_COMPARE_WITH_TIMEOUT(alice.heard.size(), 30, kWaitMs); // TCP is lossless
-        QCOMPARE(alice.heard.last().sequence, quint16{129});
-        QCOMPARE(alice.heard.last().userId, bob.id());
+        QTRY_COMPARE_WITH_TIMEOUT(alice.heard.size(), 30, kWaitMs); // TCP to alice is lossless
+        // Bob's packets reach the server over UDP, which may reorder them, so compare sets.
+        QSet<quint16> sequences;
+        for (const AudioData &audio : std::as_const(alice.heard)) {
+            sequences.insert(audio.sequence);
+            QCOMPARE(audio.userId, bob.id());
+        }
+        QCOMPARE(sequences.size(), 30);
+        QVERIFY(sequences.contains(100) && sequences.contains(129));
         QVERIFY(m_server->voiceStats().receivedTunnel >= 30);
         QVERIFY(m_server->voiceStats().sentTunnel >= 30);
     }

@@ -17,6 +17,50 @@ void ClientState::clear()
     m_self = {};
     m_channels.clear();
     m_users.clear();
+    m_roles.clear();
+}
+
+bool ClientState::can(moderation::Capability capability) const
+{
+    return m_self.capabilities.contains(static_cast<quint16>(capability));
+}
+
+bool ClientState::canSomewhere(moderation::Capability capability) const
+{
+    return can(capability) || m_self.channelCapabilities.contains(static_cast<quint16>(capability));
+}
+
+bool ClientState::canModerate() const
+{
+    using C = moderation::Capability;
+    for (C c : {C::UserMove, C::UserWarn, C::UserMute, C::UserKick, C::UserBanTemporary, C::SanctionRevoke,
+                C::ReportReview, C::AppealDecide, C::AuditRead, C::RoleAssign, C::RoleManage, C::AccountManage,
+                C::ServerConfigure, C::ServerMonitor}) {
+        if (canSomewhere(c)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QString ClientState::roleName(quint32 roleId) const
+{
+    for (const RoleInfo &role : m_roles) {
+        if (role.id == roleId) {
+            return role.name;
+        }
+    }
+    return tr("role %1").arg(roleId);
+}
+
+int ClientState::roleRank(quint32 roleId) const
+{
+    for (const RoleInfo &role : m_roles) {
+        if (role.id == roleId) {
+            return role.rank;
+        }
+    }
+    return 0;
 }
 
 void ClientState::setSelf(const AuthResult &self)
@@ -57,7 +101,45 @@ bool ClientState::apply(const Message &message)
                 m_users.insert(u.id, u);
             }
         }
+        m_roles = snapshot->roles.mid(0, 1000);
         emit reset();
+        return true;
+    }
+    if (const auto *updated = std::get_if<ChannelUpdated>(&message)) {
+        const auto it = m_channels.find(updated->channel.id);
+        if (it != m_channels.end() && updated->channel.id != kRootChannelId &&
+            updated->channel.parentId == it->parentId) {
+            *it = updated->channel;
+            emit channelUpdated(*it);
+        }
+        return true;
+    }
+    if (const auto *updated = std::get_if<UserUpdated>(&message)) {
+        const auto it = m_users.find(updated->userId);
+        if (it != m_users.end()) {
+            const UserInfo before = *it;
+            it->role = static_cast<Role>(updated->roleId);
+            it->flags = updated->flags;
+            if (updated->userId == m_self.userId) {
+                m_self.role = it->role;
+            }
+            emit userUpdated(*it, before);
+        }
+        return true;
+    }
+    if (const auto *roles = std::get_if<RolesChanged>(&message)) {
+        m_roles = roles->roles.mid(0, 1000);
+        emit rolesChanged();
+        return true;
+    }
+    if (const auto *caps = std::get_if<CapabilitiesChanged>(&message)) {
+        m_self.capabilities = caps->capabilities;
+        m_self.channelCapabilities = caps->channelCapabilities;
+        emit capabilitiesChanged();
+        return true;
+    }
+    if (const auto *notice = std::get_if<SanctionNotice>(&message)) {
+        emit sanctionNotice(notice->sanction);
         return true;
     }
     if (const auto *added = std::get_if<ChannelAdded>(&message)) {

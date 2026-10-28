@@ -25,7 +25,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
     qint64 now = 0;
     server::VoiceRouter router(
-        {}, [](quint32 id) { return QList<quint32>{id == 1 ? 2u : 1u}; }, [&now] { return now; });
+        {}, [](quint32 id, protocol::AudioStream) { return QList<quint32>{id == 1 ? 2u : 1u}; },
+        [&now] { return now; });
     const protocol::AudioSetup setup = router.addSession(1, 10350);
     router.addSession(2, 10350);
     security::PacketSealer client(setup.clientToServerKey, security::PacketDirection::ClientToServer,

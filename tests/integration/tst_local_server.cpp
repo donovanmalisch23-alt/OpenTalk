@@ -38,20 +38,20 @@ private slots:
         QVERIFY2(security::initializeTls(&error), qPrintable(error));
     }
 
-    void hostAndJoinAsAdministrator()
+    void hostAndJoinAsOwner()
     {
         QTemporaryDir dir;
         client::LocalServer local;
 
         QString accountError = QStringLiteral("pending");
-        local.createAccount(kServer, dir.path(), QStringLiteral("host"), QStringLiteral("a good password"), true,
-                            [&](const QString &e) { accountError = e; });
+        local.createAccount(kServer, dir.path(), QStringLiteral("host"), QStringLiteral("a good password"),
+                            QStringLiteral("owner"), [&](const QString &e) { accountError = e; });
         QTRY_VERIFY_WITH_TIMEOUT(accountError != QLatin1String("pending"), kWaitMs);
         QVERIFY2(accountError.isEmpty(), qPrintable(accountError));
 
         QString duplicateError = QStringLiteral("pending");
-        local.createAccount(kServer, dir.path(), QStringLiteral("HOST"), QStringLiteral("another password"), true,
-                            [&](const QString &e) { duplicateError = e; });
+        local.createAccount(kServer, dir.path(), QStringLiteral("HOST"), QStringLiteral("another password"),
+                            QStringLiteral("owner"), [&](const QString &e) { duplicateError = e; });
         QTRY_VERIFY_WITH_TIMEOUT(duplicateError != QLatin1String("pending"), kWaitMs);
         QVERIFY(duplicateError.contains(QStringLiteral("already exists")));
 
@@ -83,7 +83,7 @@ private slots:
         connection.connectToServer(o);
         QTRY_VERIFY_WITH_TIMEOUT(!connected.isEmpty() || !disconnected.isEmpty(), kWaitMs);
         QCOMPARE(connected.count(), 1);
-        QVERIFY(connection.serverState().selfRole() == protocol::Role::Admin);
+        QVERIFY(connection.serverState().selfRole() == protocol::Role::Owner);
         QCOMPARE(connection.serverInfo().serverName, QStringLiteral("Living room"));
 
         // Stopping tells connected users the server is shutting down.

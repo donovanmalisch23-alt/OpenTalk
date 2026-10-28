@@ -3,6 +3,9 @@
 
 #include "opentalk/protocol/Frame.h"
 
+#include "AdminCodec.h"
+#include "CborFields.h"
+
 #include <QCborArray>
 #include <QCborMap>
 #include <QCborStreamReader>
@@ -12,6 +15,10 @@
 
 namespace opentalk::protocol {
 namespace {
+
+using detail::FieldReader;
+using detail::id63;
+using detail::isBidiControl;
 
 // CBOR map keys. Small integers keep messages compact. Keys are scoped per message type
 // (and per nested structure); see docs/protocol/proposal.md.
@@ -42,6 +49,8 @@ constexpr qint64 kAuthPassword = 3;
 constexpr qint64 kResultUserId = 1;
 constexpr qint64 kResultName = 2;
 constexpr qint64 kResultRole = 3;
+constexpr qint64 kResultCapabilities = 4;
+constexpr qint64 kResultChannelCapabilities = 5;
 // ChannelInfo (also the top level of ChannelAdded)
 constexpr qint64 kChId = 1;
 constexpr qint64 kChParent = 2;
@@ -55,9 +64,11 @@ constexpr qint64 kUsrId = 1;
 constexpr qint64 kUsrName = 2;
 constexpr qint64 kUsrRole = 3;
 constexpr qint64 kUsrChannel = 4;
+constexpr qint64 kUsrFlags = 5;
 // StateSnapshot
 constexpr qint64 kSnapChannels = 1;
 constexpr qint64 kSnapUsers = 2;
+constexpr qint64 kSnapRoles = 3;
 // Requests: key 1 is always the request ID
 constexpr qint64 kRequestId = 1;
 constexpr qint64 kReqChannel = 2;   // JoinChannel, DeleteChannel
@@ -95,190 +106,7 @@ constexpr qint64 kDataPayload = 3;
 constexpr qint64 kDataUser = 4;
 } // namespace key
 
-constexpr quint64 k63Bits = 0x7fffffffffffffffULL;
-
-bool isBidiControl(char16_t c)
-{
-    return (c >= 0x202A && c <= 0x202E) || (c >= 0x2066 && c <= 0x2069);
-}
-
-/// Reads typed fields from a decoded CBOR map, remembering the first problem.
-class FieldReader {
-public:
-    explicit FieldReader(const QCborMap &map)
-        : m_map(map)
-    {
-    }
-
-    bool ok() const { return !m_failure.has_value(); }
-    QString failure() const { return m_failure.value_or(QString()); }
-    void fail(const QString &message)
-    {
-        if (!m_failure) {
-            m_failure = message;
-        }
-    }
-
-    template <typename Int> Int integer(qint64 k, const char *name)
-    {
-        return checkedInteger<Int>(k, name).value_or(Int{});
-    }
-
-    template <typename Int> std::optional<Int> optionalInteger(qint64 k, const char *name)
-    {
-        if (!m_map.contains(k)) {
-            return std::nullopt;
-        }
-        return checkedInteger<Int>(k, name);
-    }
-
-    template <typename Enum> Enum enumeration(qint64 k, const char *name, Enum maxValue)
-    {
-        const auto v = checkedInteger<quint8>(k, name);
-        if (v && *v > static_cast<quint8>(maxValue)) {
-            fail(name, "unknown value");
-        }
-        return static_cast<Enum>(v.value_or(0));
-    }
-
-    bool boolean(qint64 k, const char *name, bool required)
-    {
-        const QCborValue value = m_map.value(k);
-        if (value.isBool()) {
-            return value.toBool();
-        }
-        if (required || !value.isUndefined()) {
-            fail(name, required ? "missing or not a boolean" : "not a boolean");
-        }
-        return false;
-    }
-
-    /// A name: not blank, no control or formatting characters.
-    QString name(qint64 k, const char *field, qsizetype maxLength)
-    {
-        const QString s = rawText(k, field, maxLength, true);
-        if (ok() && !isValidName(s, maxLength)) {
-            fail(field, "blank, or contains control or formatting characters");
-        }
-        return s;
-    }
-
-    /// Free text that may be empty: no control or formatting characters.
-    QString plainText(qint64 k, const char *field, qsizetype maxLength, bool required)
-    {
-        if (!required && !m_map.contains(k)) {
-            return {};
-        }
-        const QString s = rawText(k, field, maxLength, true);
-        for (const QChar c : s) {
-            if (c.category() == QChar::Other_Control || c.category() == QChar::Other_Format) {
-                fail(field, "contains control or formatting characters");
-                break;
-            }
-        }
-        return s;
-    }
-
-    QString chatText(qint64 k, const char *field)
-    {
-        const QString s = rawText(k, field, kMaxTextLength, true);
-        if (ok() && !isValidChatText(s)) {
-            fail(field, "blank, or contains control or bidirectional override characters");
-        }
-        return s;
-    }
-
-    /// Text with no character restrictions (passwords).
-    QString secret(qint64 k, const char *field, bool required)
-    {
-        if (!required && !m_map.contains(k)) {
-            return {};
-        }
-        const QString s = rawText(k, field, kMaxSecretLength, !required);
-        return s;
-    }
-
-    QByteArray bytes(qint64 k, const char *field, qsizetype minLength, qsizetype maxLength)
-    {
-        const QCborValue value = m_map.value(k);
-        if (!value.isByteArray()) {
-            fail(field, "missing or not a byte string");
-            return {};
-        }
-        QByteArray b = value.toByteArray();
-        if (b.size() < minLength || b.size() > maxLength) {
-            fail(field, "wrong length");
-            return {};
-        }
-        return b;
-    }
-
-    QCborArray array(qint64 k, const char *field, qsizetype maxCount)
-    {
-        const QCborValue value = m_map.value(k);
-        if (!value.isArray()) {
-            fail(field, "missing or not an array");
-            return {};
-        }
-        QCborArray a = value.toArray();
-        if (a.size() > maxCount) {
-            fail(field, "too many entries");
-            return {};
-        }
-        return a;
-    }
-
-private:
-    QString rawText(qint64 k, const char *field, qsizetype maxLength, bool allowEmpty)
-    {
-        const QCborValue value = m_map.value(k);
-        if (!value.isString()) {
-            fail(field, "missing or not a text string");
-            return {};
-        }
-        QString s = value.toString();
-        if (s.size() > maxLength) {
-            fail(field, "too long");
-            return {};
-        }
-        if (!allowEmpty && s.isEmpty()) {
-            fail(field, "empty");
-        }
-        return s;
-    }
-
-    template <typename Int> std::optional<Int> checkedInteger(qint64 k, const char *name)
-    {
-        const QCborValue value = m_map.value(k);
-        if (!value.isInteger()) {
-            fail(name, "missing or not an integer");
-            return std::nullopt;
-        }
-        // Unsigned 64-bit values above INT64_MAX arrive as non-integers in QCborValue,
-        // so every accepted value fits in qint64 here.
-        const qint64 v = value.toInteger();
-        if (v < 0 || static_cast<quint64>(v) > static_cast<quint64>(std::numeric_limits<Int>::max())) {
-            fail(name, "out of range");
-            return std::nullopt;
-        }
-        return static_cast<Int>(v);
-    }
-
-    void fail(const char *name, const char *problem)
-    {
-        fail(QString::fromLatin1(name) + QLatin1String(": ") + QString::fromLatin1(problem));
-    }
-
-    const QCborMap &m_map;
-    std::optional<QString> m_failure;
-};
-
 // ------------------------------------------------------------------------ encoding
-
-QCborValue id63(quint64 v)
-{
-    return static_cast<qint64>(v & k63Bits);
-}
 
 QCborMap channelToCbor(const ChannelInfo &c)
 {
@@ -293,10 +121,14 @@ QCborMap channelToCbor(const ChannelInfo &c)
 
 QCborMap userToCbor(const UserInfo &u)
 {
-    return {{key::kUsrId, static_cast<qint64>(u.id)},
-            {key::kUsrName, u.name},
-            {key::kUsrRole, static_cast<int>(u.role)},
-            {key::kUsrChannel, static_cast<qint64>(u.channelId)}};
+    QCborMap map{{key::kUsrId, static_cast<qint64>(u.id)},
+                 {key::kUsrName, u.name},
+                 {key::kUsrRole, static_cast<qint64>(u.role)},
+                 {key::kUsrChannel, static_cast<qint64>(u.channelId)}};
+    if (u.flags != 0) {
+        map.insert(key::kUsrFlags, static_cast<qint64>(u.flags));
+    }
+    return map;
 }
 
 QCborMap toCbor(const Hello &m)
@@ -354,7 +186,9 @@ QCborMap toCbor(const AuthResult &m)
 {
     return {{key::kResultUserId, static_cast<qint64>(m.userId)},
             {key::kResultName, m.displayName},
-            {key::kResultRole, static_cast<int>(m.role)}};
+            {key::kResultRole, static_cast<qint64>(m.role)},
+            {key::kResultCapabilities, detail::capabilitiesToCbor(m.capabilities)},
+            {key::kResultChannelCapabilities, detail::capabilitiesToCbor(m.channelCapabilities)}};
 }
 
 QCborMap toCbor(const StateSnapshot &m)
@@ -367,10 +201,19 @@ QCborMap toCbor(const StateSnapshot &m)
     for (const UserInfo &u : m.users) {
         users.append(userToCbor(u));
     }
-    return {{key::kSnapChannels, channels}, {key::kSnapUsers, users}};
+    QCborArray roles;
+    for (const RoleInfo &r : m.roles) {
+        roles.append(detail::roleToCbor(r));
+    }
+    return {{key::kSnapChannels, channels}, {key::kSnapUsers, users}, {key::kSnapRoles, roles}};
 }
 
 QCborMap toCbor(const ChannelAdded &m)
+{
+    return channelToCbor(m.channel);
+}
+
+QCborMap toCbor(const ChannelUpdated &m)
 {
     return channelToCbor(m.channel);
 }
@@ -473,7 +316,7 @@ QCborMap toCbor(const AudioData &m)
 
 bool isKnownErrorCode(quint16 code)
 {
-    return code <= static_cast<quint16>(ErrorCode::NameInUse);
+    return code <= static_cast<quint16>(ErrorCode::Muted);
 }
 
 ErrorCode errorCodeFrom(quint16 code)
@@ -508,8 +351,9 @@ UserInfo readUser(FieldReader &r)
     UserInfo u;
     u.id = r.integer<quint32>(key::kUsrId, "user.id");
     u.name = r.name(key::kUsrName, "user.name", kMaxDisplayNameLength);
-    u.role = r.enumeration<Role>(key::kUsrRole, "user.role", Role::Admin);
+    u.role = static_cast<Role>(r.integer<quint32>(key::kUsrRole, "user.role"));
     u.channelId = r.integer<quint32>(key::kUsrChannel, "user.channelId");
+    u.flags = r.optionalInteger<quint32>(key::kUsrFlags, "user.flags").value_or(0);
     if (r.ok() && (u.id == 0 || u.channelId == 0)) {
         r.fail(QStringLiteral("user: invalid id"));
     }
@@ -546,9 +390,11 @@ bool isKnownType(quint16 type)
     case MessageType::TextMessage:
     case MessageType::AudioSetup:
     case MessageType::AudioData:
+    case MessageType::ChannelUpdated:
         return true;
+    default:
+        return detail::isAdminType(static_cast<MessageType>(type));
     }
-    return false;
 }
 
 } // namespace
@@ -609,6 +455,36 @@ MessageType messageType(const Message &message)
         MessageType operator()(const TextMessage &) const { return MessageType::TextMessage; }
         MessageType operator()(const AudioSetup &) const { return MessageType::AudioSetup; }
         MessageType operator()(const AudioData &) const { return MessageType::AudioData; }
+        MessageType operator()(const ChannelUpdated &) const { return MessageType::ChannelUpdated; }
+        MessageType operator()(const EditChannel &) const { return MessageType::EditChannel; }
+        MessageType operator()(const UserUpdated &) const { return MessageType::UserUpdated; }
+        MessageType operator()(const RolesChanged &) const { return MessageType::RolesChanged; }
+        MessageType operator()(const CapabilitiesChanged &) const { return MessageType::CapabilitiesChanged; }
+        MessageType operator()(const SanctionNotice &) const { return MessageType::SanctionNotice; }
+        MessageType operator()(const MoveUser &) const { return MessageType::MoveUser; }
+        MessageType operator()(const ApplySanction &) const { return MessageType::ApplySanction; }
+        MessageType operator()(const RevokeSanction &) const { return MessageType::RevokeSanction; }
+        MessageType operator()(const ListRequest &) const { return MessageType::ListRequest; }
+        MessageType operator()(const ListResult &) const { return MessageType::ListResult; }
+        MessageType operator()(const SetUserRole &) const { return MessageType::SetUserRole; }
+        MessageType operator()(const ReportUser &) const { return MessageType::ReportUser; }
+        MessageType operator()(const ResolveReport &) const { return MessageType::ResolveReport; }
+        MessageType operator()(const SubmitAppeal &) const { return MessageType::SubmitAppeal; }
+        MessageType operator()(const DecideAppeal &) const { return MessageType::DecideAppeal; }
+        MessageType operator()(const ReadAudit &) const { return MessageType::ReadAudit; }
+        MessageType operator()(const AuditPage &) const { return MessageType::AuditPage; }
+        MessageType operator()(const CreateAccount &) const { return MessageType::CreateAccount; }
+        MessageType operator()(const DeleteAccount &) const { return MessageType::DeleteAccount; }
+        MessageType operator()(const SetAccountPassword &) const { return MessageType::SetAccountPassword; }
+        MessageType operator()(const SaveRole &) const { return MessageType::SaveRole; }
+        MessageType operator()(const DeleteRole &) const { return MessageType::DeleteRole; }
+        MessageType operator()(const AddRule &) const { return MessageType::AddRule; }
+        MessageType operator()(const DeleteRule &) const { return MessageType::DeleteRule; }
+        MessageType operator()(const ServerSettingsRequest &) const { return MessageType::ServerSettingsRequest; }
+        MessageType operator()(const ServerSettingsResult &) const { return MessageType::ServerSettingsResult; }
+        MessageType operator()(const GetServerStats &) const { return MessageType::GetServerStats; }
+        MessageType operator()(const ServerStatsResult &) const { return MessageType::ServerStatsResult; }
+        MessageType operator()(const TransferOwnership &) const { return MessageType::TransferOwnership; }
     };
     return std::visit(Visitor{}, message);
 }
@@ -627,6 +503,27 @@ bool isClientToServer(MessageType type)
     case MessageType::DeleteChannel:
     case MessageType::SendText:
     case MessageType::AudioData:
+    case MessageType::EditChannel:
+    case MessageType::MoveUser:
+    case MessageType::ApplySanction:
+    case MessageType::RevokeSanction:
+    case MessageType::ListRequest:
+    case MessageType::SetUserRole:
+    case MessageType::ReportUser:
+    case MessageType::ResolveReport:
+    case MessageType::SubmitAppeal:
+    case MessageType::DecideAppeal:
+    case MessageType::ReadAudit:
+    case MessageType::CreateAccount:
+    case MessageType::DeleteAccount:
+    case MessageType::SetAccountPassword:
+    case MessageType::SaveRole:
+    case MessageType::DeleteRole:
+    case MessageType::AddRule:
+    case MessageType::DeleteRule:
+    case MessageType::ServerSettingsRequest:
+    case MessageType::GetServerStats:
+    case MessageType::TransferOwnership:
         return true;
     default:
         return false;
@@ -652,6 +549,15 @@ bool isServerToClient(MessageType type)
     case MessageType::TextMessage:
     case MessageType::AudioSetup:
     case MessageType::AudioData:
+    case MessageType::ChannelUpdated:
+    case MessageType::UserUpdated:
+    case MessageType::RolesChanged:
+    case MessageType::CapabilitiesChanged:
+    case MessageType::SanctionNotice:
+    case MessageType::ListResult:
+    case MessageType::AuditPage:
+    case MessageType::ServerSettingsResult:
+    case MessageType::ServerStatsResult:
         return true;
     default:
         return false;
@@ -745,7 +651,13 @@ MessageDecodeResult decodeMessage(quint16 type, QByteArrayView payload)
         AuthResult m;
         m.userId = r.integer<quint32>(key::kResultUserId, "userId");
         m.displayName = r.name(key::kResultName, "displayName", kMaxDisplayNameLength);
-        m.role = r.enumeration<Role>(key::kResultRole, "role", Role::Admin);
+        m.role = static_cast<Role>(r.integer<quint32>(key::kResultRole, "role"));
+        if (map.contains(key::kResultCapabilities)) {
+            m.capabilities = detail::readCapabilities(r, key::kResultCapabilities, "capabilities");
+        }
+        if (map.contains(key::kResultChannelCapabilities)) {
+            m.channelCapabilities = detail::readCapabilities(r, key::kResultChannelCapabilities, "channelCapabilities");
+        }
         if (r.ok() && m.userId == 0) {
             return malformed(QStringLiteral("userId must not be 0"));
         }
@@ -772,6 +684,17 @@ MessageDecodeResult decodeMessage(quint16 type, QByteArrayView payload)
                 return malformed(sub.ok() ? QStringLiteral("user entry is not a map") : sub.failure());
             }
         }
+        if (r.ok() && map.contains(key::kSnapRoles)) {
+            const QCborArray roles = r.array(key::kSnapRoles, "roles", 1000);
+            for (qsizetype i = 0; r.ok() && i < roles.size(); ++i) {
+                const QCborMap entry = roles.at(i).toMap();
+                FieldReader sub(entry);
+                m.roles.append(detail::readRole(sub));
+                if (!roles.at(i).isMap() || !sub.ok()) {
+                    return malformed(sub.ok() ? QStringLiteral("role entry is not a map") : sub.failure());
+                }
+            }
+        }
         message = m;
         break;
     }
@@ -780,6 +703,9 @@ MessageDecodeResult decodeMessage(quint16 type, QByteArrayView payload)
         break;
     case MessageType::ChannelRemoved:
         message = ChannelRemoved{r.integer<quint32>(key::kSubjectId, "channelId")};
+        break;
+    case MessageType::ChannelUpdated:
+        message = ChannelUpdated{readChannel(r)};
         break;
     case MessageType::JoinChannel: {
         JoinChannel m;
@@ -857,6 +783,9 @@ MessageDecodeResult decodeMessage(quint16 type, QByteArrayView payload)
         message = m;
         break;
     }
+    default:
+        message = detail::decodeAdmin(static_cast<MessageType>(type), r);
+        break;
     }
     if (!r.ok()) {
         return malformed(r.failure());
@@ -901,6 +830,12 @@ QString toString(ErrorCode code)
         return QStringLiteral("InvalidRequest");
     case ErrorCode::NameInUse:
         return QStringLiteral("NameInUse");
+    case ErrorCode::Banned:
+        return QStringLiteral("Banned");
+    case ErrorCode::Kicked:
+        return QStringLiteral("Kicked");
+    case ErrorCode::Muted:
+        return QStringLiteral("Muted");
     }
     return QStringLiteral("Unknown");
 }

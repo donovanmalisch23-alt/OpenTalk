@@ -19,11 +19,14 @@
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QPointer>
 #include <QStandardPaths>
 
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <string>
@@ -98,7 +101,7 @@ int runAccountCommand(const QCommandLineParser &parser, const QCommandLineOption
     if (parser.isSet(create)) {
         const auto role = server::roleFromString(parser.value(roleOption));
         if (!role) {
-            return fail(QStringLiteral("--role must be user or admin"));
+            return fail(QStringLiteral("--role must be user, moderator, restricted, admin or owner"));
         }
         const QString name = parser.value(create);
         if (!server::ServerDatabase::isValidUsername(name)) {
@@ -112,6 +115,13 @@ int runAccountCommand(const QCommandLineParser &parser, const QCommandLineOption
         if (!hash || !db.createAccount(name, *hash, *role, &error)) {
             return fail(hash ? error : QStringLiteral("could not hash the password"));
         }
+        moderation::AuditEntry entry;
+        entry.timeMs = QDateTime::currentMSecsSinceEpoch();
+        entry.actorName = QStringLiteral("(command line)");
+        entry.action = QStringLiteral("account.created");
+        entry.target = name;
+        entry.details = QStringLiteral("role=%1").arg(server::toString(*role));
+        db.appendAudit(entry);
         printLine(QStringLiteral("Created %1 account \"%2\".").arg(server::toString(*role), name));
         return 0;
     }
@@ -190,7 +200,8 @@ int main(int argc, char *argv[])
                                                          "terminal or standard input, and exit."),
                                           QStringLiteral("username"));
     const QCommandLineOption roleOption(QStringLiteral("role"),
-                                        QStringLiteral("Role for --create-account: user or admin (default: user)."),
+                                        QStringLiteral("Role for --create-account: user, moderator, admin or owner "
+                                                       "(default: user). A server has one owner."),
                                         QStringLiteral("role"), QStringLiteral("user"));
     const QCommandLineOption setPasswordOption(QStringLiteral("set-password"),
                                                QStringLiteral("Change an account's password and exit."),
@@ -198,12 +209,29 @@ int main(int argc, char *argv[])
     const QCommandLineOption deleteOption(QStringLiteral("delete-account"),
                                           QStringLiteral("Delete an account and exit."), QStringLiteral("username"));
     const QCommandLineOption listOption(QStringLiteral("list-accounts"), QStringLiteral("List accounts and exit."));
+    const QCommandLineOption recoverOption(
+        QStringLiteral("recover-owner"),
+        QStringLiteral("Make an existing account the owner (for when the owner is locked out), and exit. Stop the "
+                       "server first. The change is recorded in the audit log."),
+        QStringLiteral("username"));
+    const QCommandLineOption verifyAuditOption(QStringLiteral("verify-audit"),
+                                               QStringLiteral("Check the audit log's hash chain and exit (exit code 2 "
+                                                              "if it was changed)."));
+    const QCommandLineOption exportAuditOption(QStringLiteral("export-audit"),
+                                               QStringLiteral("Write the audit log as text to a file and exit. Keep "
+                                                              "copies elsewhere: they show later tampering."),
+                                               QStringLiteral("file"));
+    const QCommandLineOption retentionOption(QStringLiteral("audit-retention-days"),
+                                             QStringLiteral("Remove audit log entries older than this many days "
+                                                            "(default: 365; 0 keeps them forever)."),
+                                             QStringLiteral("days"), QStringLiteral("365"));
     const QCommandLineOption stdinOption(QStringLiteral("stop-when-stdin-closes"),
                                          QStringLiteral("Shut down gracefully when standard input closes. Used when "
                                                         "the OpenTalk app runs the server for you."));
-    parser.addOptions({dataOption, listenOption, portOption, certOption, keyOption, nameOption, maxOption, guestsOption,
-                       noUdpOption, logOption, createOption, roleOption, setPasswordOption, deleteOption, listOption,
-                       stdinOption});
+    parser.addOptions({dataOption,    listenOption,      portOption,        certOption,      keyOption,
+                       nameOption,    maxOption,         guestsOption,      noUdpOption,     logOption,
+                       createOption,  roleOption,        setPasswordOption, deleteOption,    listOption,
+                       recoverOption, verifyAuditOption, exportAuditOption, retentionOption, stdinOption});
     parser.process(app);
 
     const std::optional<logging::Level> level = logging::levelFromString(parser.value(logOption));
@@ -232,6 +260,59 @@ int main(int argc, char *argv[])
     if (accountResult >= 0) {
         return accountResult;
     }
+    if (parser.isSet(recoverOption)) {
+        const QString name = parser.value(recoverOption);
+        if (!database.setOwner(name, &error)) {
+            return fail(error);
+        }
+        moderation::AuditEntry entry;
+        entry.timeMs = QDateTime::currentMSecsSinceEpoch();
+        entry.actorName = QStringLiteral("(owner recovery)");
+        entry.action = QStringLiteral("owner.recovered");
+        entry.target = name;
+        entry.details = QStringLiteral("from the command line with access to the data folder");
+        database.appendAudit(entry);
+        printLine(
+            QStringLiteral("\"%1\" is now the owner. The previous owner, if any, is an administrator.").arg(name));
+        return 0;
+    }
+    if (parser.isSet(verifyAuditOption)) {
+        const moderation::AuditVerification result = database.verifyAudit();
+        if (!result.intact) {
+            printLine(QStringLiteral("The audit log was changed: %1.").arg(result.problem));
+            return 2;
+        }
+        printLine(QStringLiteral("The audit log is intact (%1 entries checked).").arg(result.checked));
+        return 0;
+    }
+    if (parser.isSet(exportAuditOption)) {
+        QFile file(parser.value(exportAuditOption));
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            return fail(QStringLiteral("cannot write %1: %2").arg(file.fileName(), file.errorString()));
+        }
+        // Read newest first in pages, then write oldest first.
+        QList<moderation::AuditEntry> entries;
+        quint64 before = 0;
+        while (true) {
+            const QList<moderation::AuditEntry> page = database.auditEntries(before, 1000);
+            if (page.isEmpty()) {
+                break;
+            }
+            entries.append(page);
+            before = page.last().sequence;
+        }
+        std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b) { return a.sequence < b.sequence; });
+        for (const moderation::AuditEntry &e : std::as_const(entries)) {
+            file.write(moderation::formatAuditEntry(e).toUtf8() + '\n');
+        }
+        const moderation::AuditVerification result = database.verifyAudit();
+        file.write(QStringLiteral("# %1 entries; chain %2\n")
+                       .arg(entries.size())
+                       .arg(result.intact ? QStringLiteral("intact") : QStringLiteral("BROKEN: ") + result.problem)
+                       .toUtf8());
+        printLine(QStringLiteral("Wrote %1 audit entries to %2.").arg(entries.size()).arg(file.fileName()));
+        return 0;
+    }
 
     if (!security::initializeTls(&error)) {
         return fail(error);
@@ -252,6 +333,11 @@ int main(int argc, char *argv[])
         return fail(QStringLiteral("--max-users must be between 1 and 100000"));
     }
     config.maxSessions = maxUsers;
+    const int retention = parser.value(retentionOption).toInt(&ok);
+    if (!ok || retention < 0 || retention > 36500) {
+        return fail(QStringLiteral("--audit-retention-days must be between 0 and 36500"));
+    }
+    config.auditRetentionDays = retention;
     const QString name = parser.value(nameOption).trimmed();
     if (name.isEmpty() || name.size() > protocol::kMaxNameLength) {
         return fail(QStringLiteral("--name must be 1 to %1 characters").arg(protocol::kMaxNameLength));
@@ -307,8 +393,8 @@ int main(int argc, char *argv[])
     }
     printLine(QStringLiteral("Data folder: %1").arg(QDir::toNativeSeparators(dataDir)));
     if (database.accounts().isEmpty()) {
-        printLine(QStringLiteral("There are no accounts yet. Create an administrator with:"));
-        printLine(QStringLiteral("  opentalk-server --data-dir \"%1\" --create-account <name> --role admin")
+        printLine(QStringLiteral("There are no accounts yet. Create the owner (yourself) with:"));
+        printLine(QStringLiteral("  opentalk-server --data-dir \"%1\" --create-account <name> --role owner")
                       .arg(QDir::toNativeSeparators(dataDir)));
     }
     printLine(QStringLiteral("Certificate fingerprint (share it so users can verify this server):"));

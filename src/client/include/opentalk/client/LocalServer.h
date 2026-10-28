@@ -39,9 +39,10 @@ public:
     static QString defaultExecutable();
 
     /// Creates an account in `dataDir` without blocking (hashing takes about a second).
-    /// `done` receives an empty string on success, else an error message.
+    /// `role` is "owner", "admin", "moderator" or "user". `done` receives an empty string
+    /// on success, else an error message.
     void createAccount(const QString &executable, const QString &dataDir, const QString &userName,
-                       const QString &password, bool admin, std::function<void(const QString &error)> done);
+                       const QString &password, const QString &role, std::function<void(const QString &error)> done);
 
     void start(const Options &options);
     void stop();

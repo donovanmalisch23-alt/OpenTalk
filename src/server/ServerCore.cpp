@@ -5,6 +5,7 @@
 #include "opentalk/server/PasswordWorker.h"
 #include "opentalk/server/ServerDatabase.h"
 
+#include <QDateTime>
 #include <QRandomGenerator>
 
 #include <algorithm>
@@ -12,11 +13,12 @@
 namespace opentalk::server {
 
 using namespace protocol;
+using moderation::Capability;
 
 ServerCore::ServerCore(Config config, ServerDatabase *database, PasswordWorker &passwords,
                        std::function<qint64()> nowMs, std::function<qint64()> wallClockMs, QObject *parent)
     : QObject(parent)
-    , m_config(config)
+    , m_config(std::move(config))
     , m_database(database)
     , m_passwords(passwords)
     , m_now(std::move(nowMs))
@@ -29,13 +31,22 @@ ServerCore::ServerCore(Config config, ServerDatabase *database, PasswordWorker &
 
     const QString randomPassword = QString::number(QRandomGenerator::system()->generate64(), 36);
     m_dummyHash = security::hashPassword(randomPassword, passwords.cost()).value_or(QByteArray());
+
+    m_settings.name = m_config.serverName;
+    m_settings.allowGuests = m_config.allowGuests;
+    m_settings.maxUsers = static_cast<quint16>(std::clamp(m_config.maxUsers, 1, 65535));
+    m_settings.maxVoiceBitrate = m_config.maxVoiceBitrate;
+    m_permissions.setRoles(moderation::builtInRoles());
 }
 
 ServerCore::~ServerCore() = default;
 
-bool ServerCore::loadChannels(QString *errorMessage)
+bool ServerCore::load(QString *errorMessage)
 {
+    m_startedMs = m_now();
     if (m_database == nullptr) {
+        applySettings(m_settings, false);
+        audit(nullptr, QStringLiteral("server.started"), QString(), 0, QString(), QStringLiteral("database=none"));
         return true;
     }
     for (const StoredChannel &stored : m_database->channels()) {
@@ -57,6 +68,46 @@ bool ServerCore::loadChannels(QString *errorMessage)
         m_channels.insert(info.id, Channel{info, stored.passwordHash, 0, {}});
     }
     qCInfo(lcServer) << "Loaded" << (m_channels.size() - 1) << "persistent channel(s)";
+
+    reloadPermissions();
+    m_sanctions.setSanctions(m_database->sanctions());
+    m_reports = m_database->reports();
+    m_appeals = m_database->appeals();
+
+    // Saved settings win over the start-up configuration once someone changed them.
+    ServerSettingsInfo saved = m_settings;
+    saved.name = m_database->setting(QStringLiteral("server.name"), saved.name);
+    saved.welcomeMessage = m_database->setting(QStringLiteral("server.welcomeMessage"));
+    saved.contact = m_database->setting(QStringLiteral("server.contact"));
+    const QString guests = m_database->setting(QStringLiteral("server.allowGuests"));
+    if (!guests.isEmpty()) {
+        saved.allowGuests = guests == QLatin1String("1");
+    }
+    saved.maxUsers = static_cast<quint16>(
+        m_database->setting(QStringLiteral("server.maxUsers"), QString::number(saved.maxUsers)).toUInt());
+    saved.maxVoiceBitrate =
+        m_database->setting(QStringLiteral("server.maxVoiceBitrate"), QString::number(saved.maxVoiceBitrate)).toUInt();
+    saved.maxTemporaryBanDays = static_cast<quint16>(
+        m_database->setting(QStringLiteral("server.maxTemporaryBanDays"), QString::number(saved.maxTemporaryBanDays))
+            .toUInt());
+    if (saved.maxUsers == 0) {
+        saved.maxUsers = 200;
+    }
+    applySettings(saved, false);
+
+    pruneAuditLog();
+    m_auditStatus = m_database->verifyAudit();
+    if (!m_auditStatus.intact) {
+        qCWarning(lcServer).noquote() << "The audit log has been tampered with or damaged:" << m_auditStatus.problem;
+    }
+    if (!m_database->owner()) {
+        qCWarning(lcServer) << "This server has no owner. Create one with --create-account <name> --role owner, or "
+                               "--recover-owner <name>.";
+    }
+    audit(nullptr, QStringLiteral("server.started"), QString(), 0, QString(),
+          QStringLiteral("auditIntact=%1; checked=%2")
+              .arg(m_auditStatus.intact ? QStringLiteral("yes") : QStringLiteral("no"))
+              .arg(m_auditStatus.checked));
     return true;
 }
 
@@ -133,12 +184,44 @@ void ServerCore::handleMessage(quint32 sessionId, const Message &message)
         createChannel(client, *create);
     } else if (const auto *remove = std::get_if<DeleteChannel>(&message)) {
         deleteChannel(client, *remove);
+    } else if (const auto *edit = std::get_if<EditChannel>(&message)) {
+        editChannel(client, *edit);
     } else if (const auto *text = std::get_if<SendText>(&message)) {
         sendText(client, *text);
     } else if (std::holds_alternative<Error>(message)) {
         // Informational; nothing to do.
-    } else {
+    } else if (!handleAdminMessage(client, message)) {
         emit closeSession(sessionId, ErrorCode::ProtocolViolation, QStringLiteral("unexpected message"));
+    }
+}
+
+void ServerCore::pruneAuditLog()
+{
+    m_lastAuditPruneMs = m_wallClock();
+    if (m_database == nullptr || m_config.auditRetentionDays <= 0) {
+        return;
+    }
+    const qint64 cutoff = m_lastAuditPruneMs - static_cast<qint64>(m_config.auditRetentionDays) * 24 * 3600 * 1000;
+    if (const int pruned = m_database->pruneAudit(cutoff); pruned > 0) {
+        qCInfo(lcServer) << "Removed" << pruned << "audit entries older than" << m_config.auditRetentionDays << "days";
+    }
+}
+
+void ServerCore::tick()
+{
+    constexpr qint64 kDayMs = 24LL * 3600 * 1000;
+    if (m_wallClock() - m_lastAuditPruneMs >= kDayMs) {
+        pruneAuditLog();
+    }
+    const QList<moderation::Sanction> expired = m_sanctions.expire(m_wallClock());
+    for (const moderation::Sanction &sanction : expired) {
+        updateSanction(sanction);
+        audit(nullptr, QStringLiteral("sanction.expired"), sanction.targetName, sanction.channelId, QString(),
+              QStringLiteral("sanction=%1; type=%2").arg(sanction.id).arg(moderation::toString(sanction.type)));
+        sendSanctionNotice(sanction);
+        for (Client *client : clientsMatching(sanction)) {
+            refreshUser(*client);
+        }
     }
 }
 
@@ -174,6 +257,22 @@ bool ServerCore::nameTakenOnline(const QString &name) const
     });
 }
 
+QString ServerCore::describeBan(const moderation::Sanction &ban) const
+{
+    QString text = ban.expiresMs == 0 ? QStringLiteral("you are banned from this server")
+                                      : QStringLiteral("you are banned from this server until %1 UTC")
+                                            .arg(QDateTime::fromMSecsSinceEpoch(ban.expiresMs)
+                                                     .toUTC()
+                                                     .toString(QStringLiteral("yyyy-MM-dd HH:mm")));
+    if (!ban.reason.isEmpty()) {
+        text += QStringLiteral(". Reason: %1").arg(ban.reason);
+    }
+    if (!m_settings.contact.isEmpty()) {
+        text += QStringLiteral(". Contact: %1").arg(m_settings.contact);
+    }
+    return text.left(kMaxDetailLength);
+}
+
 void ServerCore::authenticate(Client &client, const Authenticate &request)
 {
     const quint32 sessionId = client.id;
@@ -182,11 +281,19 @@ void ServerCore::authenticate(Client &client, const Authenticate &request)
                           QStringLiteral("too many failed logins from your address; try again later"));
         return;
     }
+    if (onlineUserCount() >= m_settings.maxUsers) {
+        emit closeSession(sessionId, ErrorCode::ServerFull, QStringLiteral("the server is full"));
+        return;
+    }
 
     if (request.mode == Authenticate::Mode::Guest) {
-        if (!m_config.allowGuests) {
+        if (!m_settings.allowGuests) {
             emit closeSession(sessionId, ErrorCode::AuthenticationFailed,
                               QStringLiteral("this server does not allow guests"));
+            return;
+        }
+        if (const auto ban = m_sanctions.activeBan({0, client.address.toString()}, {}, m_wallClock())) {
+            emit closeSession(sessionId, ErrorCode::Banned, describeBan(*ban));
             return;
         }
         const bool reserved = m_database != nullptr && m_database->findAccount(request.name).has_value();
@@ -194,7 +301,7 @@ void ServerCore::authenticate(Client &client, const Authenticate &request)
             emit closeSession(sessionId, ErrorCode::NameInUse, QStringLiteral("that name is already in use"));
             return;
         }
-        goOnline(client, request.name, Role::Guest);
+        goOnline(client, request.name, Role::Guest, 0);
         return;
     }
 
@@ -213,18 +320,50 @@ void ServerCore::authenticate(Client &client, const Authenticate &request)
                         usable ? QStringLiteral("wrong password") : QStringLiteral("unknown or disabled account"));
             return;
         }
-        goOnline(*it, account->username, account->role);
+        // Checked only after the password, so a ban does not reveal that an account exists.
+        if (const auto ban = m_sanctions.activeBan({account->id, address.toString()}, {}, m_wallClock())) {
+            emit closeSession(sessionId, ErrorCode::Banned, describeBan(*ban));
+            return;
+        }
+        if (Client *existing = onlineAccount(account->id)) {
+            // The same account logging in again replaces the old session (for example
+            // after a network change).
+            emit closeSession(existing->id, ErrorCode::NameInUse, QStringLiteral("logged in from somewhere else"));
+            sessionEnded(existing->id);
+        }
+        goOnline(*it, account->username, account->role, account->id);
     });
 }
 
-void ServerCore::goOnline(Client &client, const QString &name, Role role)
+void ServerCore::goOnline(Client &client, const QString &name, Role role, qint64 accountId)
 {
     client.state = ClientState::Online;
-    client.user = UserInfo{client.id, name, role, kRootChannelId};
+    client.accountId = accountId;
+    client.user = UserInfo{client.id, name, role, kRootChannelId, 0};
+    client.effectiveRole = static_cast<moderation::RoleId>(role);
     m_channels[kRootChannelId].members.insert(client.id);
     qCInfo(lcServer).noquote() << "Session" << client.id << "logged in as" << name << "(" << toString(role) << ")";
 
-    emit sendTo(client.id, AuthResult{client.id, name, role});
+    // Restrictions and mutes that already apply.
+    const moderation::SanctionSubject subject = subjectOf(client);
+    if (m_sanctions.isRestricted(subject, m_wallClock())) {
+        client.effectiveRole = moderation::roles::kRestricted;
+        client.user.flags |= RestrictedFlag;
+    }
+    if (m_sanctions.isVoiceMuted(subject, {}, m_wallClock())) {
+        client.user.flags |= VoiceMutedFlag;
+    }
+    if (m_sanctions.isTextMuted(subject, {}, m_wallClock())) {
+        client.user.flags |= TextMutedFlag;
+    }
+    for (Capability c : m_permissions.serverCapabilities(actorOf(client))) {
+        client.capabilities.append(static_cast<quint16>(c));
+    }
+    for (Capability c : m_permissions.channelOnlyCapabilities(actorOf(client))) {
+        client.channelCapabilities.append(static_cast<quint16>(c));
+    }
+
+    emit sendTo(client.id, AuthResult{client.id, name, role, client.capabilities, client.channelCapabilities});
     StateSnapshot snapshot;
     for (const Channel &c : std::as_const(m_channels)) {
         snapshot.channels.append(c.info); // ordered by ID, so parents come before children
@@ -234,18 +373,31 @@ void ServerCore::goOnline(Client &client, const QString &name, Role role)
             snapshot.users.append(c.user);
         }
     }
+    snapshot.roles = roleInfos();
     emit sendTo(client.id, snapshot);
     broadcast(UserJoined{client.user}, client.id);
+    if (!m_settings.welcomeMessage.isEmpty()) {
+        emit sendTo(client.id, TextMessage{TextTarget::Server, 0, 0, m_settings.welcomeMessage, m_wallClock()});
+    }
+    for (const moderation::Sanction &s : m_sanctions.activeFor(subject, m_wallClock())) {
+        emit sendTo(client.id, SanctionNotice{sanctionInfo(s, false)});
+    }
     emit userOnline(client.id);
 }
 
-QList<quint32> ServerCore::voiceRecipients(quint32 sessionId) const
+QList<quint32> ServerCore::voiceRecipients(quint32 sessionId, AudioStream stream) const
 {
-    const auto client = m_clients.constFind(sessionId);
-    if (client == m_clients.constEnd() || client->state != ClientState::Online) {
+    const Client *client = onlineClient(sessionId);
+    if (client == nullptr) {
         return {};
     }
-    const auto channel = m_channels.constFind(client->user.channelId);
+    const quint32 channelId = client->user.channelId;
+    const Capability needed = stream == AudioStream::Voice ? Capability::VoiceTransmit : Capability::MediaTransmit;
+    if (!can(*client, needed, channelId) ||
+        m_sanctions.isVoiceMuted(subjectOf(*client), chainOf(channelId), m_wallClock())) {
+        return {};
+    }
+    const auto channel = m_channels.constFind(channelId);
     if (channel == m_channels.constEnd()) {
         return {};
     }
@@ -267,6 +419,25 @@ ServerCore::Client *ServerCore::onlineClient(quint32 id)
     return (it != m_clients.end() && it->state == ClientState::Online) ? &*it : nullptr;
 }
 
+const ServerCore::Client *ServerCore::onlineClient(quint32 id) const
+{
+    auto it = m_clients.constFind(id);
+    return (it != m_clients.cend() && it->state == ClientState::Online) ? &*it : nullptr;
+}
+
+ServerCore::Client *ServerCore::onlineAccount(qint64 accountId)
+{
+    if (accountId == 0) {
+        return nullptr;
+    }
+    for (Client &c : m_clients) {
+        if (c.state == ClientState::Online && c.accountId == accountId) {
+            return &c;
+        }
+    }
+    return nullptr;
+}
+
 void ServerCore::joinChannel(Client &client, const JoinChannel &request)
 {
     const auto target = m_channels.constFind(request.channelId);
@@ -278,12 +449,22 @@ void ServerCore::joinChannel(Client &client, const JoinChannel &request)
         reply(client.id, request.requestId);
         return;
     }
-    const bool admin = client.user.role == Role::Admin;
-    if (!admin && target->info.maxUsers > 0 && target->members.size() >= target->info.maxUsers) {
+    if (!can(client, Capability::ChannelJoin, request.channelId)) {
+        refuseUnauthorized(client, request.requestId, Capability::ChannelJoin, request.channelId);
+        return;
+    }
+    if (const auto ban = m_sanctions.activeBan(subjectOf(client), chainOf(request.channelId), m_wallClock())) {
+        refuse(client.id, request.requestId, ErrorCode::Banned,
+               ban->reason.isEmpty() ? QStringLiteral("you are banned from this channel")
+                                     : QStringLiteral("you are banned from this channel: %1").arg(ban->reason));
+        return;
+    }
+    const bool bypass = can(client, Capability::ChannelBypassRestrictions, request.channelId);
+    if (!bypass && target->info.maxUsers > 0 && target->members.size() >= target->info.maxUsers) {
         refuse(client.id, request.requestId, ErrorCode::ChannelFull, QStringLiteral("the channel is full"));
         return;
     }
-    if (admin || target->passwordHash.isEmpty()) {
+    if (bypass || target->passwordHash.isEmpty()) {
         moveUser(client, request.channelId);
         reply(client.id, request.requestId);
         return;
@@ -315,11 +496,10 @@ void ServerCore::joinChannel(Client &client, const JoinChannel &request)
 
 void ServerCore::createChannel(Client &client, const CreateChannel &request)
 {
-    const Role role = client.user.role;
-    if (role == Role::Guest || (request.persistent && role != Role::Admin)) {
-        refuse(client.id, request.requestId, ErrorCode::NotAuthorized,
-               request.persistent ? QStringLiteral("only administrators can create persistent channels")
-                                  : QStringLiteral("guests cannot create channels"));
+    const Capability needed =
+        request.persistent ? Capability::ChannelCreatePersistent : Capability::ChannelCreateTemporary;
+    if (!can(client, needed, request.parentId)) {
+        refuseUnauthorized(client, request.requestId, needed, request.parentId);
         return;
     }
     if (request.persistent && m_database == nullptr) {
@@ -411,6 +591,7 @@ void ServerCore::finishCreateChannel(quint32 clientId, const CreateChannel &requ
             return;
         }
         info.id = stored.id;
+        audit(client, QStringLiteral("channel.created"), info.name, info.id);
     } else {
         info.id = m_nextTemporaryChannelId++;
     }
@@ -426,11 +607,6 @@ void ServerCore::finishCreateChannel(quint32 clientId, const CreateChannel &requ
 
 void ServerCore::deleteChannel(Client &client, const DeleteChannel &request)
 {
-    if (client.user.role != Role::Admin) {
-        refuse(client.id, request.requestId, ErrorCode::NotAuthorized,
-               QStringLiteral("only administrators can delete channels"));
-        return;
-    }
     if (request.channelId == kRootChannelId) {
         refuse(client.id, request.requestId, ErrorCode::InvalidRequest, QStringLiteral("the root cannot be deleted"));
         return;
@@ -440,6 +616,10 @@ void ServerCore::deleteChannel(Client &client, const DeleteChannel &request)
         refuse(client.id, request.requestId, ErrorCode::NotFound, QStringLiteral("no such channel"));
         return;
     }
+    if (!can(client, Capability::ChannelDelete, request.channelId)) {
+        refuseUnauthorized(client, request.requestId, Capability::ChannelDelete, request.channelId);
+        return;
+    }
     const bool hasChildren = std::any_of(m_channels.cbegin(), m_channels.cend(),
                                          [&request](const Channel &c) { return c.info.parentId == request.channelId; });
     if (hasChildren) {
@@ -447,9 +627,15 @@ void ServerCore::deleteChannel(Client &client, const DeleteChannel &request)
                QStringLiteral("delete its sub-channels first"));
         return;
     }
-    if (it->info.persistent && !m_database->deleteChannel(request.channelId)) {
-        refuse(client.id, request.requestId, ErrorCode::InternalError, QStringLiteral("could not delete the channel"));
-        return;
+    const QString name = it->info.name;
+    if (it->info.persistent) {
+        if (!m_database->deleteChannel(request.channelId)) {
+            refuse(client.id, request.requestId, ErrorCode::InternalError,
+                   QStringLiteral("could not delete the channel"));
+            return;
+        }
+        m_database->deleteRulesForChannel(request.channelId);
+        reloadPermissions();
     }
     // Everyone inside goes to the root first, so no one is ever in a missing channel.
     const QSet<quint32> members = it->members;
@@ -460,8 +646,86 @@ void ServerCore::deleteChannel(Client &client, const DeleteChannel &request)
     }
     m_channels.remove(request.channelId);
     qCInfo(lcServer) << "Session" << client.id << "deleted channel" << request.channelId;
+    audit(&client, QStringLiteral("channel.deleted"), name, request.channelId);
     broadcast(ChannelRemoved{request.channelId});
     reply(client.id, request.requestId);
+}
+
+void ServerCore::editChannel(Client &client, const EditChannel &request)
+{
+    const auto it = m_channels.constFind(request.channelId);
+    if (it == m_channels.cend() || request.channelId == kRootChannelId) {
+        refuse(client.id, request.requestId,
+               request.channelId == kRootChannelId ? ErrorCode::InvalidRequest : ErrorCode::NotFound,
+               request.channelId == kRootChannelId ? QStringLiteral("the root is renamed in the server settings")
+                                                   : QStringLiteral("no such channel"));
+        return;
+    }
+    // People may edit temporary channels they created; everything else needs channel.edit.
+    const bool ownTemporary = !it->info.persistent && it->ownerId == client.id;
+    if (!ownTemporary && !can(client, Capability::ChannelEdit, request.channelId)) {
+        refuseUnauthorized(client, request.requestId, Capability::ChannelEdit, request.channelId);
+        return;
+    }
+    if (request.maxUsers > m_config.maxUsersPerChannelLimit) {
+        refuse(client.id, request.requestId, ErrorCode::InvalidRequest, QStringLiteral("user limit is too high"));
+        return;
+    }
+    const bool nameTaken = std::any_of(m_channels.cbegin(), m_channels.cend(), [&](const Channel &c) {
+        return c.info.id != request.channelId && c.info.parentId == it->info.parentId &&
+               c.info.name.compare(request.name, Qt::CaseInsensitive) == 0;
+    });
+    if (nameTaken) {
+        refuse(client.id, request.requestId, ErrorCode::NameInUse,
+               QStringLiteral("a channel with that name already exists here"));
+        return;
+    }
+    if (!request.changePassword || request.password.isEmpty()) {
+        finishEditChannel(client.id, request, request.changePassword ? QByteArray() : it->passwordHash);
+        return;
+    }
+    const quint32 clientId = client.id;
+    m_passwords.hash(request.password, this, [this, clientId, request](std::optional<QByteArray> hash) {
+        if (onlineClient(clientId) == nullptr) {
+            return;
+        }
+        if (!hash) {
+            refuse(clientId, request.requestId, ErrorCode::InternalError,
+                   QStringLiteral("could not store the password"));
+            return;
+        }
+        finishEditChannel(clientId, request, *hash);
+    });
+}
+
+void ServerCore::finishEditChannel(quint32 clientId, const EditChannel &request, const QByteArray &passwordHash)
+{
+    Client *client = onlineClient(clientId);
+    auto it = m_channels.find(request.channelId);
+    if (client == nullptr || it == m_channels.end()) {
+        if (client != nullptr) {
+            refuse(clientId, request.requestId, ErrorCode::NotFound, QStringLiteral("no such channel"));
+        }
+        return;
+    }
+    if (it->info.persistent) {
+        StoredChannel stored{it->info.id,  it->info.parentId == kRootChannelId ? 0 : it->info.parentId,
+                             request.name, request.topic,
+                             passwordHash, request.maxUsers};
+        if (!m_database->updateChannel(stored)) {
+            refuse(clientId, request.requestId, ErrorCode::InternalError, QStringLiteral("could not save the channel"));
+            return;
+        }
+    }
+    it->info.name = request.name;
+    it->info.topic = request.topic;
+    it->info.maxUsers = request.maxUsers;
+    it->info.hasPassword = !passwordHash.isEmpty();
+    it->passwordHash = passwordHash;
+    audit(client, QStringLiteral("channel.edited"), request.name, request.channelId, QString(),
+          request.changePassword ? QStringLiteral("passwordChanged=yes") : QString());
+    broadcast(ChannelUpdated{it->info});
+    reply(clientId, request.requestId);
 }
 
 void ServerCore::moveUser(Client &client, quint32 channelId)
@@ -477,6 +741,8 @@ void ServerCore::moveUser(Client &client, quint32 channelId)
     client.user.channelId = channelId;
     broadcast(UserMoved{client.id, channelId});
     removeIfEmptyTemporary(previous);
+    // Channel-scoped mutes may differ in the new channel.
+    refreshUser(client);
 }
 
 void ServerCore::removeIfEmptyTemporary(quint32 channelId)
@@ -503,12 +769,21 @@ void ServerCore::sendText(Client &client, const SendText &request)
     }
     client.textTokens -= 1.0;
 
+    const quint32 here = client.user.channelId;
+    if (m_sanctions.isTextMuted(subjectOf(client), chainOf(here), m_wallClock())) {
+        refuse(client.id, request.requestId, ErrorCode::Muted, QStringLiteral("you are muted"));
+        return;
+    }
     TextMessage message{request.target, client.id, request.targetId, request.text, m_wallClock()};
     switch (request.target) {
     case TextTarget::Channel: {
-        if (request.targetId != client.user.channelId) {
+        if (request.targetId != here) {
             refuse(client.id, request.requestId, ErrorCode::NotAuthorized,
                    QStringLiteral("you can only write to the channel you are in"));
+            return;
+        }
+        if (!can(client, Capability::TextSend, here)) {
+            refuseUnauthorized(client, request.requestId, Capability::TextSend, here);
             return;
         }
         const QSet<quint32> members = m_channels.value(request.targetId).members;
@@ -518,6 +793,10 @@ void ServerCore::sendText(Client &client, const SendText &request)
         break;
     }
     case TextTarget::User:
+        if (!can(client, Capability::TextPrivate)) {
+            refuseUnauthorized(client, request.requestId, Capability::TextPrivate);
+            return;
+        }
         if (request.targetId == client.id || onlineClient(request.targetId) == nullptr) {
             refuse(client.id, request.requestId, ErrorCode::NotFound, QStringLiteral("that user is not online"));
             return;
@@ -526,9 +805,8 @@ void ServerCore::sendText(Client &client, const SendText &request)
         emit sendTo(client.id, message); // echo, so the sender sees the server's time stamp
         break;
     case TextTarget::Server:
-        if (client.user.role != Role::Admin) {
-            refuse(client.id, request.requestId, ErrorCode::NotAuthorized,
-                   QStringLiteral("only administrators can send server-wide messages"));
+        if (!can(client, Capability::BroadcastSend)) {
+            refuseUnauthorized(client, request.requestId, Capability::BroadcastSend);
             return;
         }
         message.targetId = 0;
@@ -559,6 +837,13 @@ void ServerCore::reply(quint32 sessionId, quint64 requestId, std::optional<quint
 void ServerCore::refuse(quint32 sessionId, quint64 requestId, ErrorCode code, const QString &detail)
 {
     emit sendTo(sessionId, Error{code, requestId, detail});
+}
+
+void ServerCore::refuseUnauthorized(const Client &client, quint64 requestId, Capability capability, quint32 channelId)
+{
+    const moderation::Decision decision = m_permissions.check(actorOf(client), capability, chainOf(channelId));
+    refuse(client.id, requestId, ErrorCode::NotAuthorized,
+           QStringLiteral("%1: %2").arg(moderation::capabilityName(capability), decision.reason));
 }
 
 } // namespace opentalk::server

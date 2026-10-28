@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "opentalk/moderation/Permissions.h"
 #include "opentalk/protocol/Messages.h"
 
 #include <QHash>
@@ -37,6 +38,18 @@ public:
     QString selfName() const { return m_self.displayName; }
     protocol::Role selfRole() const { return m_self.role; }
     quint32 currentChannelId() const;
+    /// What this user may do server-wide, as the server last said. Use it to offer only
+    /// possible actions; the server decides in the end (channel rules can differ).
+    bool can(moderation::Capability capability) const;
+    /// True if the user may do this server-wide or in at least one channel (a channel
+    /// moderator, for example). Use it to offer actions that the server checks per channel.
+    bool canSomewhere(moderation::Capability capability) const;
+    /// True if the user may do any moderation or administration at all.
+    bool canModerate() const;
+    QList<protocol::RoleInfo> roles() const { return m_roles; }
+    /// The role's name, for example "Moderator" (or "role 105" if unknown).
+    QString roleName(quint32 roleId) const;
+    int roleRank(quint32 roleId) const;
 
     std::optional<protocol::ChannelInfo> channel(quint32 id) const;
     std::optional<protocol::UserInfo> user(quint32 id) const;
@@ -58,11 +71,19 @@ signals:
     void userLeft(const opentalk::protocol::UserInfo &user);
     void userMoved(const opentalk::protocol::UserInfo &user, quint32 fromChannelId);
     void textReceived(const opentalk::protocol::TextMessage &message);
+    void channelUpdated(const opentalk::protocol::ChannelInfo &channel);
+    /// A user's role or flags (mutes, restriction) changed.
+    void userUpdated(const opentalk::protocol::UserInfo &user, const opentalk::protocol::UserInfo &before);
+    void rolesChanged();
+    void capabilitiesChanged();
+    /// A sanction on this user was applied, changed or lifted.
+    void sanctionNotice(const opentalk::protocol::SanctionInfo &sanction);
 
 private:
     bool addChannel(const protocol::ChannelInfo &channel);
 
     protocol::AuthResult m_self;
+    QList<protocol::RoleInfo> m_roles;
     QMap<quint32, protocol::ChannelInfo> m_channels;
     QHash<quint32, protocol::UserInfo> m_users;
 };

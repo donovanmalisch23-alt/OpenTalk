@@ -5,6 +5,7 @@
 #include "opentalk/audio/Sounds.h"
 #include "opentalk/client/Connection.h"
 #include "opentalk/client/LocalServer.h"
+#include "opentalk/moderation/Sanctions.h"
 #include "opentalk/storage/ServerProfiles.h"
 #include "opentalk/ui/ConnectDialog.h"
 
@@ -46,6 +47,7 @@ class ChannelTree;
 ///   F4                settings
 ///   Ctrl+T            talk on/off (push-to-talk mode)   Ctrl+M  mute microphone
 ///   Ctrl+Shift+M      mute everything you hear          Ctrl+Shift+V  volume for the selected user
+///   Ctrl+Shift+A      administration (for moderators and administrators)
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -115,6 +117,14 @@ public slots:
     void toggleDeafen();
     void openUserVolume();
     void openAudioSettings();
+    void editSelectedChannel();
+    void moveSelectedUser();
+    void reportSelectedUser();
+    void openMySanctions();
+    void openAdministration();
+    void sendBroadcast();
+    /// Opens the warn/mute/kick/ban dialog for the selected user, preset to `type`.
+    void moderateSelectedUser(opentalk::moderation::SanctionType type);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -142,6 +152,10 @@ private:
     void onConnectionLost(const client::DisconnectInfo &info, int attempt, int delayMs);
     void onTextReceived(const protocol::TextMessage &message);
     void onRequestFinished(quint64 requestId, const std::optional<protocol::Error> &error);
+    void onSanctionNotice(const protocol::SanctionInfo &sanction);
+    void onUserUpdated(const protocol::UserInfo &user, const protocol::UserInfo &before);
+    /// Remembers what to say when request `id` succeeds or fails.
+    void track(quint64 id, const QString &failure, const QString &success = {});
     void handleUntrustedCertificate(const client::DisconnectInfo &info);
     void launchLocalServer(const LocalServerDialog::Choice &choice);
     void onLocalServerStarted(quint16 port, const QString &fingerprint);
@@ -164,6 +178,7 @@ private:
     QString m_password;
     bool m_saveProfile = false;
     QHash<quint64, QString> m_requestDescriptions;
+    QHash<quint64, QString> m_requestSuccesses;
 
     TrustPrompt m_trustPrompt;
     ErrorReporter m_errorReporter;
@@ -194,6 +209,16 @@ private:
     QAction *m_muteAction = nullptr;
     QAction *m_deafenAction = nullptr;
     QAction *m_userVolumeAction = nullptr;
+    QAction *m_editChannelAction = nullptr;
+    QAction *m_broadcastAction = nullptr;
+    QAction *m_warnAction = nullptr;
+    QAction *m_muteUserAction = nullptr;
+    QAction *m_kickAction = nullptr;
+    QAction *m_banAction = nullptr;
+    QAction *m_moveUserAction = nullptr;
+    QAction *m_reportAction = nullptr;
+    QAction *m_mySanctionsAction = nullptr;
+    QAction *m_adminAction = nullptr;
     QList<QAction *> m_paneActions;
 };
 

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "opentalk/moderation/Appeals.h"
+#include "opentalk/moderation/Audit.h"
+#include "opentalk/moderation/Permissions.h"
+#include "opentalk/moderation/Sanctions.h"
 #include "opentalk/protocol/Messages.h"
 
 #include <QByteArray>
@@ -29,7 +33,8 @@ struct StoredChannel {
     quint16 maxUsers = 0;    ///< 0 means unlimited.
 };
 
-/// The server's persistent data in one SQLite file: accounts and persistent channels.
+/// The server's persistent data in one SQLite file: accounts, persistent channels,
+/// roles and permission rules, sanctions, reports, appeals, the audit log and settings.
 ///
 /// - The schema is versioned (PRAGMA user_version). Before an upgrade the file is copied
 ///   to "<file>.v<N>-backup", and the upgrade runs in a transaction.
@@ -42,7 +47,7 @@ public:
     ServerDatabase(const ServerDatabase &) = delete;
     ServerDatabase &operator=(const ServerDatabase &) = delete;
 
-    static constexpr int kSchemaVersion = 1;
+    static constexpr int kSchemaVersion = 2;
 
     bool open(const QString &path, QString *errorMessage = nullptr);
     void close();
@@ -60,11 +65,55 @@ public:
     bool setRole(const QString &username, protocol::Role role);
     bool deleteAccount(const QString &username);
     int adminCount() const;
+    std::optional<Account> findAccountById(qint64 id) const;
+    std::optional<Account> owner() const;
+    /// Makes `username` the owner; the previous owner becomes an administrator.
+    bool setOwner(const QString &username, QString *errorMessage = nullptr);
+
+    QList<moderation::RoleDefinition> roles() const;
+    /// Inserts (id 0: a new ID from 100 up is assigned) or replaces a role.
+    bool saveRole(moderation::RoleDefinition &role, QString *errorMessage = nullptr);
+    bool deleteRole(moderation::RoleId id);
+    int accountsWithRole(moderation::RoleId id) const;
+
+    QList<moderation::PermissionRule> rules() const;
+    bool insertRule(moderation::PermissionRule &rule);
+    bool deleteRule(quint64 id);
+    void deleteRulesForChannel(quint32 channelId);
+
+    QList<moderation::Sanction> sanctions() const;
+    bool insertSanction(moderation::Sanction &sanction);
+    bool updateSanction(const moderation::Sanction &sanction);
+
+    QList<moderation::Report> reports() const;
+    bool insertReport(moderation::Report &report);
+    bool updateReport(const moderation::Report &report);
+
+    QList<moderation::Appeal> appeals() const;
+    bool insertAppeal(moderation::Appeal &appeal);
+    bool updateAppeal(const moderation::Appeal &appeal);
+
+    /// Appends an entry to the hash-chained audit log (sequence and hashes are filled in).
+    bool appendAudit(moderation::AuditEntry &entry);
+    /// Newest first, entries with sequence < `beforeSequence` (0 = from the newest).
+    QList<moderation::AuditEntry> auditEntries(quint64 beforeSequence, int limit) const;
+    quint64 auditCount() const;
+    std::optional<moderation::AuditEntry> lastAuditEntry() const;
+    /// Checks the whole chain, starting after the last pruned entry.
+    moderation::AuditVerification verifyAudit() const;
+    /// Removes entries older than `cutoffMs`, keeping the chain checkable from the first
+    /// remaining entry. Returns the number removed.
+    int pruneAudit(qint64 cutoffMs);
+
+    QString setting(const QString &key, const QString &defaultValue = {}) const;
+    bool setSetting(const QString &key, const QString &value);
 
     QList<StoredChannel> channels() const;
     /// Stores a new channel and sets `channel.id`. Returns false on failure.
     bool insertChannel(StoredChannel &channel, QString *errorMessage = nullptr);
     bool deleteChannel(quint32 id);
+    /// Changes name, topic, password hash and limit of a stored channel.
+    bool updateChannel(const StoredChannel &channel);
 
 private:
     bool migrate(int fromVersion, QString *errorMessage);

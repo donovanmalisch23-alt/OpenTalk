@@ -36,6 +36,14 @@ add_dependencies(tst_mainwindow_online opentalk_server_app)
 add_test(NAME tst_mainwindow_online COMMAND tst_mainwindow_online)
 set_tests_properties(tst_mainwindow_online PROPERTIES TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+qt_add_executable(tst_moderation_ui tst_moderation_ui.cpp)
+target_link_libraries(tst_moderation_ui PRIVATE
+    Qt6::Test OpenTalk::Ui OpenTalk::Server OpenTalk::Security OpenTalk::Audio OpenTalk::CompilerOptions)
+target_compile_definitions(tst_moderation_ui PRIVATE
+    OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+add_test(NAME tst_moderation_ui COMMAND tst_moderation_ui)
+set_tests_properties(tst_moderation_ui PROPERTIES TIMEOUT 300 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 qt_add_executable(tst_local_server tst_local_server.cpp)
 target_link_libraries(tst_local_server PRIVATE Qt6::Test OpenTalk::Client OpenTalk::Security OpenTalk::CompilerOptions)
 target_compile_definitions(tst_local_server PRIVATE

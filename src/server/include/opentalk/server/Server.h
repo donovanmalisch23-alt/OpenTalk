@@ -48,6 +48,8 @@ struct ServerConfig {
     /// Audio for a client whose connection has this much unsent data is dropped rather
     /// than queued, so one slow client cannot build up delay or memory.
     qint64 maxTunnelBacklogBytes = 256 * 1024;
+    /// Audit log entries older than this are removed (0 keeps them forever).
+    int auditRetentionDays = 365;
 };
 
 /// Accepts TLS connections and runs one ServerSession per client. Runs on the thread

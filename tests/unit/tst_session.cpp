@@ -234,6 +234,24 @@ private slots:
         QVERIFY(p.clientClosed.first().code == ErrorCode::ServerShuttingDown);
     }
 
+    void finalServerErrorClosesClientWithItsReason()
+    {
+        Pipe p;
+        p.connect();
+        // An answer to a request does not end anything...
+        p.server.sendMessage(Error{ErrorCode::NotFound, 5, QStringLiteral("no such channel")});
+        p.pump();
+        QVERIFY(p.client.state() == SessionState::Established);
+        // ...but an Error that answers no request is the server's last word, and the
+        // client keeps its reason instead of seeing a dropped connection.
+        p.server.closeWithError(ErrorCode::Kicked, QStringLiteral("you were kicked: spam"));
+        p.pump();
+        QCOMPARE(p.clientClosed.size(), 1);
+        QVERIFY(p.clientClosed.first().initiator == CloseInfo::Initiator::Peer);
+        QVERIFY(p.clientClosed.first().code == ErrorCode::Kicked);
+        QCOMPARE(p.clientClosed.first().detail, QStringLiteral("you were kicked: spam"));
+    }
+
     void oversizedFrameClosesSession()
     {
         Pipe p;

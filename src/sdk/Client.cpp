@@ -72,8 +72,14 @@ Role toSdk(protocol::Role role)
         return Role::User;
     case protocol::Role::Admin:
         return Role::Admin;
+    case protocol::Role::Owner:
+        return Role::Owner;
+    case protocol::Role::Moderator:
+        return Role::Moderator;
+    case protocol::Role::Restricted:
+        return Role::Restricted;
     }
-    return Role::Guest;
+    return Role::Custom;
 }
 
 User toSdk(const protocol::UserInfo &u)

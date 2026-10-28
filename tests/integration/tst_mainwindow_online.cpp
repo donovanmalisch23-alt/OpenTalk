@@ -297,7 +297,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(m_window->connection().state() == client::ConnectionState::Connected, 30'000);
         QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join(QLatin1Char('\n'))));
         QVERIFY(m_trustQuestions.isEmpty()); // our own server: nothing to confirm
-        QVERIFY(m_window->connection().serverState().selfRole() == protocol::Role::Admin);
+        QVERIFY(m_window->connection().serverState().selfRole() == protocol::Role::Owner);
         QVERIFY(m_window->historyText().contains(QStringLiteral("is running on port %1").arg(port)));
         // The choices (but not the password) are remembered.
         QCOMPARE(m_settings->value(storage::client::kLocalServerAdminName).toString(), QStringLiteral("owner"));

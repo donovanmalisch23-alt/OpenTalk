@@ -12,5 +12,5 @@ add_library(opentalk_client STATIC
 add_library(OpenTalk::Client ALIAS opentalk_client)
 target_include_directories(opentalk_client PUBLIC include)
 target_link_libraries(opentalk_client
-    PUBLIC Qt6::Network OpenTalk::Protocol OpenTalk::Security
+    PUBLIC Qt6::Network OpenTalk::Protocol OpenTalk::Security OpenTalk::Moderation
     PRIVATE OpenTalk::Logging OpenTalk::CompilerOptions)

@@ -41,10 +41,12 @@ public:
         quint64 rejected = 0; ///< Forged, replayed, malformed or over the rate limit.
     };
 
-    /// `recipients(sessionId)` lists the sessions that should hear that user right now
+    /// `recipients(sessionId, stream)` lists the sessions that should hear that user right now
     /// (decided by ServerCore: same channel, permissions). `nowMs` is a monotonic clock.
-    VoiceRouter(Config config, std::function<QList<quint32>(quint32)> recipients, std::function<qint64()> nowMs,
-                QObject *parent = nullptr);
+    VoiceRouter(Config config, std::function<QList<quint32>(quint32, protocol::AudioStream)> recipients,
+                std::function<qint64()> nowMs, QObject *parent = nullptr);
+    /// Changes the bit rate announced to sessions set up from now on.
+    void setMaxBitrate(quint32 bitsPerSecond) { m_config.maxBitrate = bitsPerSecond; }
 
     /// Creates keys for a logged-in session and returns the setup message to send it.
     /// `udpPort` 0 means UDP is unavailable and everything goes through the tunnel.
@@ -81,7 +83,7 @@ private:
     bool udpUsable(const Peer &peer) const;
 
     Config m_config;
-    std::function<QList<quint32>(quint32)> m_recipients;
+    std::function<QList<quint32>(quint32, protocol::AudioStream)> m_recipients;
     std::function<qint64()> m_now;
     QHash<quint32, Peer> m_peers;      ///< By session ID.
     QHash<quint32, quint32> m_byUdpId; ///< UDP session ID -> session ID.

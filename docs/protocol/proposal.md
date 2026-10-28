@@ -71,8 +71,8 @@ Client                                   Server
 | 0x0200–0x02FF | Users and presence |
 | 0x0300–0x03FF | Text messages |
 | 0x0400–0x04FF | Voice: UDP setup and keys, and audio over this connection when UDP is blocked ([voice.md](voice.md)) |
-| 0x0500–0x05FF | Moderation and administration |
-| 0x0600–0x06FF | Server management and monitoring |
+| 0x0500–0x05FF | Moderation and administration, including server settings and statistics ([moderation.md](moderation.md)) |
+| 0x0600–0x06FF | Reserved for server management |
 | 0x7000–0x7FFF | Reserved for experiments; never used in releases |
 
 Unknown message types get `Error{UnknownMessage}` but the connection is **not** closed, so newer clients stay compatible as long as framing is intact. Before the handshake completes, an unknown type closes the connection.
@@ -90,6 +90,8 @@ Payloads are CBOR maps with small integer keys. Clients accept server payloads u
 | 0x0005 | Goodbye | either | 1: reason (error code, 0 = normal) |
 | 0x0006 | Error | either | 1: code (u16), 2: request ID (optional, unsigned), 3: detail (text, may be empty) |
 
+An `Error` **with** a request ID answers that request; the session continues. An `Error` **without** a request ID is the sender's last message before it closes the connection (for example `Kicked`, `Banned`, `ProtocolViolation`), with one exception: `UnknownMessage`, which never ends a session. A client must treat the code and detail of such a final `Error` as the reason for the disconnection, and must not reconnect automatically after `Kicked`, `Banned`, `AuthenticationFailed` or `NameInUse`.
+
 **Text rules:** names are 1–128 UTF-16 code units and not blank. Detail text is at most 1024. Control and invisible formatting characters (for example U+202E, which reverses text direction) are rejected, so a hostile peer cannot hide or disguise text shown to users or written to logs.
 
 **Session rules:**
@@ -106,7 +108,7 @@ Payloads are CBOR maps with small integer keys. Clients accept server payloads u
 | TLS handshake timeout (server) | 10 s |
 | Shutdown | Server sends Goodbye{ServerShuttingDown} to everyone, waits up to 3 s, then closes |
 
-**Error and Goodbye codes:** 0 None, 1 ProtocolViolation, 2 UnsupportedVersion, 3 UnknownMessage, 4 MalformedMessage, 5 RateLimited, 6 ServerFull, 7 Timeout, 8 ServerShuttingDown, 9 InternalError, 10 AuthenticationFailed, 11 NotAuthorized, 12 NotFound, 13 ChannelFull, 14 WrongChannelPassword, 15 InvalidRequest, 16 NameInUse. Codes are never renumbered. Unknown codes from newer peers are treated as InternalError.
+**Error and Goodbye codes:** 0 None, 1 ProtocolViolation, 2 UnsupportedVersion, 3 UnknownMessage, 4 MalformedMessage, 5 RateLimited, 6 ServerFull, 7 Timeout, 8 ServerShuttingDown, 9 InternalError, 10 AuthenticationFailed, 11 NotAuthorized, 12 NotFound, 13 ChannelFull, 14 WrongChannelPassword, 15 InvalidRequest, 16 NameInUse, 17 Banned, 18 Kicked, 19 Muted. Codes are never renumbered. Unknown codes from newer peers are treated as InternalError.
 
 Welcome also carries 6: guests allowed (bool, optional).
 
@@ -115,7 +117,7 @@ Welcome also carries 6: guests allowed (bool, optional).
 | Type | Name | Direction | Fields |
 |---|---|---|---|
 | 0x0007 | Authenticate | C→S | 1: mode (0 account, 1 guest), 2: name, 3: password (account mode only; up to 1024 characters, any characters) |
-| 0x0008 | AuthResult | S→C | 1: your user ID, 2: display name, 3: role (0 guest, 1 user, 2 admin) |
+| 0x0008 | AuthResult | S→C | 1: your user ID, 2: display name, 3: role ID (0 guest, 1 user, 2 admin; Phase 5 adds more and fields 4–5, see [moderation.md](moderation.md)) |
 | 0x0100 | StateSnapshot | S→C | 1: array of channels, 2: array of users (at most 10,000 each) |
 | 0x0101 | ChannelAdded | S→C | a channel (fields below) |
 | 0x0102 | ChannelRemoved | S→C | 1: channel ID |
@@ -131,7 +133,7 @@ Welcome also carries 6: guests allowed (bool, optional).
 | 0x0400 | AudioSetup | S→C | 1: UDP port (0 = none), 2: UDP session ID, 3: client-to-server key (32 bytes), 4: server-to-client key (32 bytes), 5: maximum bit rate. Sent after login. |
 | 0x0401 | AudioData | both | 1: stream (0 voice, 1 media, 2 computer audio), 2: sequence number, 3: Opus packet (1–1275 bytes), 4: speaker's user ID (server only) |
 
-**Channel** fields: 1: ID, 2: parent ID (0 only for the root), 3: name (empty only for the root), 4: topic, 5: persistent, 6: has password, 7: maximum users. **User** fields: 1: ID, 2: name, 3: role, 4: channel ID.
+**Channel** fields: 1: ID, 2: parent ID (0 only for the root), 3: name (empty only for the root), 4: topic, 5: persistent, 6: has password, 7: maximum users. **User** fields: 1: ID, 2: name, 3: role ID, 4: channel ID, 5: flags (Phase 5, optional). Phase 5 also adds ChannelUpdated (0x0103), EditChannel (0x0113) and UserUpdated (0x0203); see [moderation.md](moderation.md).
 
 **IDs.** User IDs are per connection and valid until the user disconnects; they are not account IDs. Channel 1 is the root. Persistent channels have IDs from 1000 and keep them across restarts. Temporary channels have IDs from 0x80000000.
 

@@ -71,11 +71,26 @@ Deliverables: [project brief](project-brief.md), [risk assessment](risk-assessme
 - **Numbers published:** CPU, jitter and loss tolerance, and network latency are in [benchmarks](audio/benchmarks.md), together with the test setup.
 - **Not yet measured:** device latency and listening quality on real hardware.
 
-## Phase 5: Administration and moderation
+## Phase 5: Administration and moderation (done, except the NVDA pass)
 
-The moderation library (roles, ranks, resolution, sanctions, audit chain, reports, appeals); server configuration UI; monitoring; owner recovery; the authorization test matrix.
+| ID | Milestone | Status |
+|---|---|---|
+| M5.1 | Moderation library: capabilities, roles and ranks, rule resolution, sanctions, hash-chained audit, reports, appeals | Done; `tst_moderation` |
+| M5.2 | Database schema 2 with migration from Phase 3 (earliest administrator becomes owner), roles, rules, sanctions, reports, appeals, audit with pruning, settings | Done; `tst_serverdatabase` |
+| M5.3 | Protocol messages 0x0500–0x052B and the server rules behind them; sanctions enforced on login, join, talk and text | Done; `tst_messages`, `tst_moderation_server`, fuzzed |
+| M5.4 | Authorization matrix: every request against every role | Done; `tst_authorization` (182 cases) |
+| M5.5 | Owner recovery, audit verification and export, audit retention on the command line | Done; `tst_server_process` |
+| M5.6 | Desktop app: Moderation menu and context actions offered by capability, role and mute labels, sanction messages, kick and ban explanations, My sanctions and appeals, the Administration dialog (sanctions, reports, appeals, accounts, roles, channel permissions, audit log, settings, statistics) | Done; `tst_moderation_ui` (the real windows against a real server, including accessible names) |
+| M5.7 | Documentation: [protocol](protocol/moderation.md), [administration guide](server-administration/moderation.md), [user guide](user-guide/moderation.md), [NVDA steps 46–57](accessibility/nvda-test-script.md#moderation-phase-5) | Done |
+| M5.8 | Manual NVDA pass of steps 46–57 | **Open: needs the owner or a tester** |
 
-**Exit:** every admin action is enforced by the server and tested against unauthorized roles; the audit chain is verified; the UI is accessible.
+**Exit criterion:** "every admin action is enforced by the server and tested against unauthorized roles; the audit chain is verified; the UI is accessible."
+
+- **Enforced and tested:** every request is checked by the server and tested for each role (`tst_authorization`).
+- **Audit chain verified:** at start-up, on request and by `--verify-audit`; tampering is detected in tests.
+- **UI accessibility:** every control in the moderation dialogs has an accessible name (automated check); the manual NVDA pass is open.
+- **Found and fixed on the way:** a kicked or banned client used to treat the server's final error as a dropped connection and reconnect. The protocol now states that an error without a request ID ends the session, and the client keeps the server's reason.
+- **Not yet:** see the [moderation model](security/moderation-model.md#not-yet-implemented) (address ranges, reporting single messages, mass-action safeguard).
 
 ## Phase 6: Plugins
 

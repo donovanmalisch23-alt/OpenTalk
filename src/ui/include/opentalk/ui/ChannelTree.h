@@ -40,7 +40,12 @@ public:
 
     /// The visible text of an item, as a screen reader will read it.
     static QString channelLabel(const QString &name, int userCount, bool hasPassword, bool persistent);
-    static QString userLabel(const QString &name, bool isSelf, int role);
+    /// For example "alice (you), moderator, muted". `role` is empty for ordinary
+    /// registered users; `flags` are protocol::UserFlag bits.
+    static QString userLabel(const QString &name, bool isSelf, const QString &role, quint32 flags);
+    /// How a role is shown after a name: "moderator", "guest", a custom role's own name,
+    /// or empty for registered users.
+    static QString roleLabel(const client::ClientState &state, quint32 roleId);
 
 signals:
     void channelActivated(quint32 channelId);

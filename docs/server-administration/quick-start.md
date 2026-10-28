@@ -1,31 +1,34 @@
 # Server quick start
 
-**Status:** works for real use on a local network or the internet. People can log in, use channels, talk, and send channel, private and server-wide messages. Fuller moderation tools arrive in Phase 5.
+**Status:** works for real use on a local network or the internet. People can log in, use channels, talk, and send channel, private and server-wide messages. Owners, administrators and moderators have roles, sanctions, reports, appeals and an audit log ([moderation guide](moderation.md)).
 
 There are two ways to run a server:
 
-- **From the app:** Server menu → **Host a server on this computer**. The app runs `opentalk-server` for you, creates your administrator account, and joins it. Your server stops when you choose Stop hosting or close OpenTalk.
+- **From the app:** Server menu → **Host a server on this computer**. The app runs `opentalk-server` for you, creates your account as the server's owner, and joins it. Your server stops when you choose Stop hosting or close OpenTalk.
 - **On its own**, for a server that keeps running without the app (a spare PC, a dedicated machine or a VPS), as described below.
 
 ## 1. Get the programs
 
 Download **OpenTalk-portable-windows-x64** from the latest successful CI run (repository → Actions). It contains `opentalk-server.exe` and the `opentalk-ping.exe` test tool.
 
-## 2. Create an administrator account
+## 2. Create the owner's account
 
 ```bat
-opentalk-server --data-dir C:\OpenTalkServer --create-account yourname --role admin
+opentalk-server --data-dir C:\OpenTalkServer --create-account yourname --role owner
 ```
 
-It asks for the password twice (at least 8 characters) without showing it. Add more accounts the same way with `--role user`. Other account commands:
+It asks for the password twice (at least 8 characters) without showing it. A server has one owner. Add more accounts the same way with `--role admin`, `--role moderator` or `--role user`, or later from the app (Moderation → Administration → Accounts). Other account commands:
 
 | Command | What it does |
 |---|---|
 | `--list-accounts` | Lists accounts and their roles. |
 | `--set-password <name>` | Changes a password. |
 | `--delete-account <name>` | Deletes an account. |
+| `--recover-owner <name>` | Makes an existing account the owner, if the owner is locked out. Stop the server first. |
+| `--verify-audit` | Checks that the audit log was not changed (exit code 2 if it was). |
+| `--export-audit <file>` | Writes the audit log to a text file. |
 
-These commands work while the server is running.
+The account commands work while the server is running; `--recover-owner` needs it stopped.
 
 ## 3. Start the server
 
@@ -46,6 +49,9 @@ The first time, it creates a self-signed **certificate** in the data folder. It 
 | `--max-users` | 200 | Maximum simultaneous connections. |
 | `--tls-cert`, `--tls-key` | `<data>\tls\server.crt` and `.key` | Use your own certificate, for example from Let's Encrypt (give the full-chain file). |
 | `--log-level` | info | `warning`, `info` or `debug`. `debug` includes IP addresses. |
+| `--audit-retention-days` | 365 | How long the audit log keeps entries. `0` keeps them forever. |
+
+Once someone changes the server settings from the app (Moderation → Administration → Server settings), the saved name, guest setting and user limit take precedence over `--name`, `--allow-guests` and `--max-users`.
 
 Press **Ctrl+C** to stop. Connected users are told the server is shutting down.
 
@@ -53,9 +59,13 @@ Press **Ctrl+C** to stop. Connected users are told the server is shutting down.
 
 | Role | Can |
 |---|---|
-| Guest | Join channels, chat, send private messages |
-| User | The same, plus create temporary channels (they vanish when empty) |
-| Admin | Everything: persistent channels, channel passwords and limits, deleting channels, server-wide messages; not blocked by channel passwords or limits |
+| Guest | Join channels, chat, send private messages, talk |
+| Registered user | The same, plus create temporary channels (they vanish when empty) |
+| Moderator | Warn, mute, kick, temporarily ban and move people; handle reports and appeals; read the audit log |
+| Administrator | Everything except transferring ownership: persistent channels, accounts, roles, permissions, server settings |
+| Owner | Everything, including transferring ownership |
+
+Owners and administrators can change these and add their own roles and per-channel rules. See the [moderation guide](moderation.md).
 
 ## 5. Check it from another computer
 

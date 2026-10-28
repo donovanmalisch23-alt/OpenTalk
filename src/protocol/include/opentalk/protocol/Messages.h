@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "opentalk/protocol/AdminMessages.h"
 #include "opentalk/protocol/Version.h"
 
 #include <QByteArray>
@@ -30,20 +31,51 @@ enum class MessageType : quint16 {
     StateSnapshot = 0x0100,
     ChannelAdded = 0x0101,
     ChannelRemoved = 0x0102,
+    ChannelUpdated = 0x0103,
     JoinChannel = 0x0110,
     CreateChannel = 0x0111,
     DeleteChannel = 0x0112,
+    EditChannel = 0x0113,
     RequestDone = 0x0120,
     // Users and presence (0x0200-0x02FF)
     UserJoined = 0x0200,
     UserLeft = 0x0201,
     UserMoved = 0x0202,
+    UserUpdated = 0x0203,
     // Text (0x0300-0x03FF)
     SendText = 0x0300,
     TextMessage = 0x0301,
     // Voice (0x0400-0x04FF)
     AudioSetup = 0x0400,
     AudioData = 0x0401,
+    // Moderation and administration (0x0500-0x05FF)
+    RolesChanged = 0x0500,
+    CapabilitiesChanged = 0x0501,
+    SanctionNotice = 0x0502,
+    MoveUser = 0x0510,
+    ApplySanction = 0x0511,
+    RevokeSanction = 0x0512,
+    ListRequest = 0x0513,
+    ListResult = 0x0514,
+    SetUserRole = 0x0515,
+    ReportUser = 0x0516,
+    ResolveReport = 0x0517,
+    SubmitAppeal = 0x0518,
+    DecideAppeal = 0x0519,
+    ReadAudit = 0x051A,
+    AuditPage = 0x051B,
+    CreateAccount = 0x0520,
+    DeleteAccount = 0x0521,
+    SetAccountPassword = 0x0522,
+    SaveRole = 0x0523,
+    DeleteRole = 0x0524,
+    AddRule = 0x0525,
+    DeleteRule = 0x0526,
+    ServerSettingsRequest = 0x0527,
+    ServerSettingsResult = 0x0528,
+    GetServerStats = 0x0529,
+    ServerStatsResult = 0x052A,
+    TransferOwnership = 0x052B,
 };
 
 /// Numeric error codes carried by Error and Goodbye messages. Values are part of the
@@ -66,14 +98,28 @@ enum class ErrorCode : quint16 {
     WrongChannelPassword = 14,
     InvalidRequest = 15,
     NameInUse = 16,
+    Banned = 17, ///< Detail says until when and why.
+    Kicked = 18, ///< In Goodbye: a moderator removed you.
+    Muted = 19,  ///< The request needs a voice or text the user is muted for.
 };
 
-/// Account roles. Phase 3 uses these fixed roles; Phase 5 replaces them with
-/// configurable roles and capabilities. Values are part of the wire format.
-enum class Role : quint8 {
-    Guest = 0, ///< Not logged in to an account; joins and chats where allowed.
+/// Role IDs. The built-in roles have these values; servers can define more roles with
+/// IDs from 100 up, so any quint32 value is valid on the wire. What a role may do is
+/// described by RoleInfo (in StateSnapshot and RolesChanged).
+enum class Role : quint32 {
+    Guest = 0, ///< Not logged in to an account.
     User = 1,  ///< Registered account.
-    Admin = 2, ///< Manages channels and can send server-wide messages.
+    Admin = 2, ///< Administrator.
+    Owner = 3, ///< The server's owner; exactly one account.
+    Moderator = 4,
+    Restricted = 5, ///< Can join channels only.
+};
+
+/// Bits in UserInfo::flags.
+enum UserFlag : quint32 {
+    VoiceMutedFlag = 0x1, ///< Muted by a moderator (cannot talk).
+    TextMutedFlag = 0x2,  ///< Cannot send messages.
+    RestrictedFlag = 0x4, ///< Under a restriction sanction.
 };
 
 // Limits, in UTF-16 code units unless stated otherwise.
@@ -156,6 +202,12 @@ struct AuthResult {
     quint32 userId = 0; ///< This session's user ID (valid until disconnect).
     QString displayName;
     Role role = Role::Guest;
+    /// What this user may do server-wide (moderation::Capability values), so the client
+    /// can offer only possible actions. The server checks every request regardless.
+    QList<quint16> capabilities;
+    /// Capabilities held only in some channels (for example a channel moderator's), so
+    /// the client can offer those actions too.
+    QList<quint16> channelCapabilities;
     friend bool operator==(const AuthResult &, const AuthResult &) = default;
 };
 
@@ -177,6 +229,7 @@ struct UserInfo {
     QString name;
     Role role = Role::Guest;
     quint32 channelId = kRootChannelId;
+    quint32 flags = 0; ///< UserFlag bits
     friend bool operator==(const UserInfo &, const UserInfo &) = default;
 };
 
@@ -184,12 +237,19 @@ struct UserInfo {
 struct StateSnapshot {
     QList<ChannelInfo> channels;
     QList<UserInfo> users;
+    QList<RoleInfo> roles;
     friend bool operator==(const StateSnapshot &, const StateSnapshot &) = default;
 };
 
 struct ChannelAdded {
     ChannelInfo channel;
     friend bool operator==(const ChannelAdded &, const ChannelAdded &) = default;
+};
+
+/// A channel's name, topic, password or limit changed.
+struct ChannelUpdated {
+    ChannelInfo channel;
+    friend bool operator==(const ChannelUpdated &, const ChannelUpdated &) = default;
 };
 
 struct ChannelRemoved {
@@ -305,9 +365,14 @@ struct AudioData {
     friend bool operator==(const AudioData &, const AudioData &) = default;
 };
 
-using Message = std::variant<Hello, Welcome, Ping, Pong, Goodbye, Error, Authenticate, AuthResult, StateSnapshot,
-                             ChannelAdded, ChannelRemoved, JoinChannel, CreateChannel, DeleteChannel, RequestDone,
-                             UserJoined, UserLeft, UserMoved, SendText, TextMessage, AudioSetup, AudioData>;
+using Message =
+    std::variant<Hello, Welcome, Ping, Pong, Goodbye, Error, Authenticate, AuthResult, StateSnapshot, ChannelAdded,
+                 ChannelRemoved, ChannelUpdated, JoinChannel, CreateChannel, DeleteChannel, EditChannel, RequestDone,
+                 UserJoined, UserLeft, UserMoved, UserUpdated, SendText, TextMessage, AudioSetup, AudioData,
+                 RolesChanged, CapabilitiesChanged, SanctionNotice, MoveUser, ApplySanction, RevokeSanction,
+                 ListRequest, ListResult, SetUserRole, ReportUser, ResolveReport, SubmitAppeal, DecideAppeal, ReadAudit,
+                 AuditPage, CreateAccount, DeleteAccount, SetAccountPassword, SaveRole, DeleteRole, AddRule, DeleteRule,
+                 ServerSettingsRequest, ServerSettingsResult, GetServerStats, ServerStatsResult, TransferOwnership>;
 
 MessageType messageType(const Message &message);
 

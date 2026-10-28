@@ -3,6 +3,7 @@
 // and a user would, and checks the whole path: start-up output, TLS, pinning, the
 // protocol handshake, and shutdown.
 
+#include <QFile>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QTemporaryDir>
@@ -104,6 +105,56 @@ private slots:
         const auto [code, output] = ping({QStringLiteral("--fingerprint"), QString(64, QLatin1Char('0'))});
         QCOMPARE(code, 1);
         QVERIFY(output.contains(QStringLiteral("does not match")));
+    }
+
+    void ownerRecoveryAndAuditCommands()
+    {
+        QTemporaryDir dir;
+        // Runs an offline command against `dir`, feeding `input`; returns {exit code, output}.
+        const auto run = [&dir](const QStringList &args, const QByteArray &input = {}) -> std::pair<int, QString> {
+            QProcess process;
+            process.setProcessChannelMode(QProcess::MergedChannels);
+            process.start(kServer, QStringList{QStringLiteral("--data-dir"), dir.path()} + args);
+            if (!process.waitForStarted(10'000)) {
+                return {-1, process.errorString()};
+            }
+            process.write(input);
+            process.closeWriteChannel();
+            if (!process.waitForFinished(30'000)) {
+                process.kill();
+                return {-1, QStringLiteral("timed out")};
+            }
+            return {process.exitCode(), QString::fromUtf8(process.readAll())};
+        };
+        auto [code, output] = run({QStringLiteral("--create-account"), QStringLiteral("first"),
+                                   QStringLiteral("--role"), QStringLiteral("owner")},
+                                  "first password\n");
+        QVERIFY2(code == 0, qPrintable(output));
+        std::tie(code, output) = run({QStringLiteral("--create-account"), QStringLiteral("second"),
+                                      QStringLiteral("--role"), QStringLiteral("owner")},
+                                     "second password\n");
+        QCOMPARE(code, 1); // one owner per server
+        std::tie(code, output) =
+            run({QStringLiteral("--create-account"), QStringLiteral("second")}, "second password\n");
+        QVERIFY2(code == 0, qPrintable(output));
+
+        // The owner is locked out: "second" takes over, and the change is audited.
+        std::tie(code, output) = run({QStringLiteral("--recover-owner"), QStringLiteral("second")});
+        QVERIFY2(code == 0, qPrintable(output));
+        std::tie(code, output) = run({QStringLiteral("--list-accounts")});
+        QVERIFY2(output.contains(QStringLiteral("second (owner)")), qPrintable(output));
+        QVERIFY2(output.contains(QStringLiteral("first (admin)")), qPrintable(output));
+
+        std::tie(code, output) = run({QStringLiteral("--verify-audit")});
+        QVERIFY2(code == 0 && output.contains(QStringLiteral("intact")), qPrintable(output));
+        const QString exported = dir.filePath(QStringLiteral("audit.txt"));
+        std::tie(code, output) = run({QStringLiteral("--export-audit"), exported});
+        QVERIFY2(code == 0, qPrintable(output));
+        QFile file(exported);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QString text = QString::fromUtf8(file.readAll());
+        QVERIFY2(text.contains(QStringLiteral("owner.recovered")) && text.contains(QStringLiteral("chain intact")),
+                 qPrintable(text));
     }
 
     void serverRejectsBadArguments()

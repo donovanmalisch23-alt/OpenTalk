@@ -58,6 +58,9 @@ Server::Server(ServerConfig config, QObject *parent)
 {
     m_tickTimer.setInterval(1000);
     connect(&m_tickTimer, &QTimer::timeout, this, [this] {
+        if (m_core) {
+            m_core->tick();
+        }
         const qint64 now = m_clock.elapsed();
         const QList<Peer *> peers = m_peers.values();
         for (Peer *peer : peers) {
@@ -100,11 +103,35 @@ bool Server::start(QString *errorMessage)
     m_passwords = std::make_unique<PasswordWorker>(m_config.passwordCost);
     ServerCore::Config coreConfig;
     coreConfig.allowGuests = m_config.allowGuests;
+    coreConfig.serverName = m_config.session.serverName;
+    coreConfig.maxUsers = m_config.maxSessions;
+    coreConfig.maxVoiceBitrate = m_config.voice.maxBitrate;
+    coreConfig.auditRetentionDays = m_config.auditRetentionDays;
     m_core = std::make_unique<ServerCore>(
         coreConfig, m_config.database, *m_passwords, [this] { return m_clock.elapsed(); },
         [] { return QDateTime::currentMSecsSinceEpoch(); });
+    connect(m_core.get(), &ServerCore::settingsChanged, this, [this](const protocol::ServerSettingsInfo &settings) {
+        // Applies to connections made from now on; people already online keep theirs.
+        m_config.session.serverName = settings.name;
+        m_config.session.guestsAllowed = settings.allowGuests;
+        m_config.allowGuests = settings.allowGuests;
+        m_config.maxSessions = settings.maxUsers;
+        m_config.voice.maxBitrate = settings.maxVoiceBitrate;
+        if (m_voice) {
+            m_voice->setMaxBitrate(settings.maxVoiceBitrate);
+        }
+    });
+    m_core->setStatsProvider([this](protocol::ServerStatsInfo &stats) {
+        stats.connections = static_cast<quint32>(m_peers.size());
+        if (m_voice) {
+            const VoiceRouter::Stats voice = m_voice->stats();
+            stats.voicePacketsIn = voice.receivedUdp + voice.receivedTunnel;
+            stats.voicePacketsOut = voice.sentUdp + voice.sentTunnel;
+            stats.voicePacketsRejected = voice.rejected;
+        }
+    });
     QString coreError;
-    if (!m_core->loadChannels(&coreError)) {
+    if (!m_core->load(&coreError)) {
         if (errorMessage != nullptr) {
             *errorMessage = coreError;
         }
@@ -122,7 +149,8 @@ bool Server::start(QString *errorMessage)
         }
     });
     m_voice = std::make_unique<VoiceRouter>(
-        m_config.voice, [this](quint32 id) { return m_core->voiceRecipients(id); },
+        m_config.voice,
+        [this](quint32 id, protocol::AudioStream stream) { return m_core->voiceRecipients(id, stream); },
         [this] { return m_clock.elapsed(); });
     connect(m_core.get(), &ServerCore::userOnline, this, [this](quint32 id) {
         if (Peer *peer = m_peers.value(id); peer != nullptr && peer->session != nullptr) {
@@ -142,7 +170,6 @@ bool Server::start(QString *errorMessage)
             peer->session->sendMessage(audio);
         }
     });
-    m_config.session.guestsAllowed = m_config.allowGuests;
 
     m_clock.start();
     m_listener = std::make_unique<Listener>(*this);

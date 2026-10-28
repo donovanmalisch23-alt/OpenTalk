@@ -265,8 +265,15 @@ void ClientSession::handleMessage(const Message &message, qint64 nowMs)
         if (state() == SessionState::Handshaking) {
             // An Error during the handshake (for example UnsupportedVersion) is fatal.
             closeWith({CloseInfo::Initiator::Peer, error->code, error->detail}, std::nullopt);
-        } else {
-            emit errorReceived(*error);
+            return;
+        }
+        emit errorReceived(*error);
+        // An Error that answers no request is the server's last message (a kick, a ban,
+        // a protocol violation), except UnknownMessage, which newer servers may send
+        // without ending the session. Closing here keeps the server's reason; waiting for
+        // the socket to close would look like a network failure and reconnect.
+        if (!error->requestId && error->code != ErrorCode::UnknownMessage) {
+            closeWith({CloseInfo::Initiator::Peer, error->code, error->detail}, std::nullopt);
         }
         return;
     }

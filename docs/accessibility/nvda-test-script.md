@@ -39,7 +39,7 @@ Run this on every release candidate with NVDA (latest stable release, default se
 |---|---|---|
 | 19 | Server menu (Alt+R) → Host a server on this computer. | The dialog opens on "Server name". Every field reads its name. The help text for "Let other computers connect" and the administrator fields is read as the description. |
 | 20 | Enter an administrator username and a password of 8+ characters, then press Enter. | Within a few seconds: "Connected to … as … You are in …" is announced. Focus is in the channel tree on the server's top channel. Windows may ask about the firewall. |
-| 21 | Arrow through the channel tree. | Channels read as "Name, 2 users, password protected, temporary" where these apply. People read as "name (you), administrator" or "name, guest". |
+| 21 | Arrow through the channel tree. | Channels read as "Name, 2 users, password protected, temporary" where these apply. People read as "name (you), owner" (you host this server) or "name, guest". |
 | 22 | Press Ctrl+N, type a channel name, and press Enter. | "You are now in …" is announced. The new channel and you inside it appear in the tree. |
 | 23 | Ctrl+4, type a message, and press Enter. | The message box empties. The history (Ctrl+3) ends with "[time] you: message". |
 | 24 | From a second computer or a second copy of OpenTalk (`OpenTalk.exe --data-dir C:\temp\second`), connect to this server as a guest. | On the first computer: "name joined" is announced once. On the second computer: a dialog shows the certificate fingerprint and asks whether to trust it. |
@@ -79,3 +79,22 @@ Use headphones, or two computers, so voices do not feed back into the microphone
 |---|---|---|
 | 44 | Set Windows scaling to 200% and restart OpenTalk. | All text is visible, nothing overlaps, and the window is usable. |
 | 45 | Turn on a Windows contrast theme. | The application follows the theme and all text is readable. |
+
+## Moderation (Phase 5)
+
+Host a server (steps 19–20) so you are its owner. On a second computer or a second copy of OpenTalk, log in as a registered user (create one first: Moderation → Administration → Accounts → New account).
+
+| # | Do | Expect |
+|---|---|---|
+| 46 | Alt+O. | The Moderation menu opens and reads Warn, Mute, Kick, Ban, Move selected user, Report selected user, My sanctions and appeals, Administration. On the second copy (a registered user) only Report, My sanctions and appeals are there. |
+| 47 | Select the other person in the channel tree. Shift+F10. | The context menu includes the same moderation actions. |
+| 48 | Choose Warn. | "Moderate name, dialog". Tab reads "What to do, Warning", "How long" (unavailable for warnings), "Where", "Reason" with its help ("Optional. The person is told the reason."), then Apply and Cancel. |
+| 49 | Type a reason and press Enter. | "You warned name." is announced. The second copy announces "Warning, from (your name). Reason: … To appeal, use Moderation, My sanctions and appeals." |
+| 50 | Choose Mute, set How long to 1 day, leave Reason empty, and press Enter. | A message says a reason is needed; focus returns to Reason. Type one and press Enter. The person reads as "name, muted" in the tree on both computers. |
+| 51 | On the second copy, type a message and press Enter. | The status says the message was not sent because you are muted. |
+| 52 | Ctrl+Shift+A on the first computer. | "Administration, dialog", focus on the tabs ("Sanctions, tab"). Ctrl+Tab moves through Reports, Appeals, Accounts, Roles, Channel permissions, Audit log, Server settings, Statistics. |
+| 53 | On the Sanctions tab, Tab to the list and arrow through it. | Each row reads in full, for example "name, Sanction: Mute until …, Reason: …, By: you, Given: …, State: active". |
+| 54 | Press "Lift sanction…", type a reason, and press Enter. | "The sanction on name was lifted." The second copy is told it was lifted, and "muted" disappears from the name. |
+| 55 | On the second copy: Moderation → Report selected user (select the first person), type what happened, Enter. Then on the first computer: Reports tab, F5. | The report is listed with the reporter's name and reason. "Mark as handled…" and "Dismiss…" work and the result is announced. |
+| 56 | On the second copy: Moderation → My sanctions and appeals. Select the warning, press "Appeal the selected sanction…", type a reason, OK. | "Your appeal was sent." On the first computer the Appeals tab shows it. Because you gave the warning and nobody else can decide, "Decide…" works for you; choose Overturn, a reason, Decide. The second copy is told "Your warning was overturned on appeal." |
+| 57 | Kick the second copy (Moderation → Kick selected user, reason, Enter). | The second copy shows a "Kicked" message with the reason and does **not** reconnect by itself. |
