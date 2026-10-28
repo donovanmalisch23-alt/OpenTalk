@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "opentalk/audio/AudioBackend.h"
+#include "opentalk/audio/Sounds.h"
 #include "opentalk/client/Connection.h"
 #include "opentalk/client/LocalServer.h"
 #include "opentalk/storage/ServerProfiles.h"
@@ -29,6 +31,7 @@ class SettingsStore;
 namespace opentalk::ui {
 
 class AnnouncementQueue;
+class AudioController;
 class ChannelTree;
 
 /// The primary window: channel tree (with the users in each channel), online users,
@@ -41,6 +44,8 @@ class ChannelTree;
 ///   Enter             in the channel tree: join the channel, or message the user
 ///   Ctrl+N            create a channel     Ctrl+P  private message to the selected user
 ///   F4                settings
+///   Ctrl+T            talk on/off (push-to-talk mode)   Ctrl+M  mute microphone
+///   Ctrl+Shift+M      mute everything you hear          Ctrl+Shift+V  volume for the selected user
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -57,8 +62,10 @@ public:
     using TrustPrompt = std::function<bool(const TrustQuestion &)>;
     using ErrorReporter = std::function<void(const QString &title, const QString &text)>;
 
+    /// `audioBackend` is the sound system to use; null means the computer's own
+    /// (tests pass a synthetic one).
     MainWindow(storage::SettingsStore &settings, const storage::AppPaths &paths, storage::ServerProfileStore &profiles,
-               QWidget *parent = nullptr);
+               std::unique_ptr<audio::AudioBackend> audioBackend = nullptr, QWidget *parent = nullptr);
     ~MainWindow() override;
 
     /// Shows `text` in the status bar and, if enabled in settings, asks the screen reader
@@ -75,6 +82,8 @@ public:
     QString historyText() const;
     client::Connection &connection() { return m_connection; }
     client::LocalServer &localServer() { return m_localServer; }
+    AudioController &audio() { return *m_audio; }
+    QString voiceStatusText() const;
 
     /// Hosts a server on this computer and joins it (what the "Host a server" dialog does).
     void startLocalServer(const LocalServerDialog::Choice &choice);
@@ -101,6 +110,11 @@ public slots:
     void deleteSelectedChannel();
     void joinChannel(quint32 channelId);
     void sendPrivateMessage(quint32 userId);
+    void toggleTransmit();
+    void toggleMicrophoneMute();
+    void toggleDeafen();
+    void openUserVolume();
+    void openAudioSettings();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -133,6 +147,11 @@ private:
     void onLocalServerStarted(quint16 port, const QString &fingerprint);
     bool isConnectedToLocalServer() const;
     static QString friendlyError(const protocol::Error &error);
+    void buildAudio(std::unique_ptr<audio::AudioBackend> backend);
+    void updateVoiceStatus();
+    void playSound(audio::EventSound sound);
+    std::optional<quint32> selectedUserId() const;
+    void openSettingsAt(const QString &category);
 
     storage::SettingsStore &m_settings;
     const storage::AppPaths &m_paths;
@@ -158,6 +177,10 @@ private:
     QPlainTextEdit *m_history = nullptr;
     QLineEdit *m_messageInput = nullptr;
     QLabel *m_statusLabel = nullptr;
+    QLabel *m_voiceLabel = nullptr;
+    AudioController *m_audio = nullptr;
+    QString m_lastDeviceProblem;
+    QTimer m_voicePathTimer;
     QAction *m_settingsAction = nullptr;
     QAction *m_connectAction = nullptr;
     QAction *m_disconnectAction = nullptr;
@@ -167,6 +190,10 @@ private:
     QAction *m_createChannelAction = nullptr;
     QAction *m_deleteChannelAction = nullptr;
     QAction *m_privateMessageAction = nullptr;
+    QAction *m_transmitAction = nullptr;
+    QAction *m_muteAction = nullptr;
+    QAction *m_deafenAction = nullptr;
+    QAction *m_userVolumeAction = nullptr;
     QList<QAction *> m_paneActions;
 };
 

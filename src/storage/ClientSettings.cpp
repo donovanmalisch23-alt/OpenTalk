@@ -3,6 +3,8 @@
 
 #include "opentalk/logging/Logging.h"
 
+#include <algorithm>
+
 namespace opentalk::storage::client {
 
 SettingsSchema schema()
@@ -24,6 +26,38 @@ SettingsSchema schema()
            [](const QVariant &v) { return v.toString().size() <= 32; }});
     s.add({kMainWindowGeometry, SettingType::ByteArray, QByteArray(), {}});
     s.add({kMainSplitterState, SettingType::ByteArray, QByteArray(), {}});
+    s.add({kAnnounceTalking, SettingType::Bool, false, {}});
+    const auto range = [](int low, int high) {
+        return [low, high](const QVariant &v) { return v.toInt() >= low && v.toInt() <= high; };
+    };
+    const auto shortText = [](const QVariant &v) { return v.toString().size() <= 512; };
+    s.add({kInputDevice, SettingType::String, QString(), shortText});
+    s.add({kOutputDevice, SettingType::String, QString(), shortText});
+    s.add({kInputVolume, SettingType::Int, 100, range(0, 400)});
+    s.add({kOutputVolume, SettingType::Int, 100, range(0, 400)});
+    s.add({kTransmitMode, SettingType::String, kTransmitPushToTalk, [](const QVariant &v) {
+               const QString mode = v.toString();
+               return mode == kTransmitPushToTalk || mode == kTransmitVoiceActivation || mode == kTransmitContinuous;
+           }});
+    s.add(
+        {kPushToTalkKey, SettingType::String, QString(), [](const QVariant &v) { return v.toString().size() <= 64; }});
+    s.add({kVoiceActivationLevel, SettingType::Int, -45, range(-80, 0)});
+    s.add({kVoiceBitrate, SettingType::Int, 32, range(8, 128)});
+    s.add({kUseUdp, SettingType::Bool, true, {}});
+    s.add({kUserVolumes, SettingType::IntMap, QVariantMap(), [](const QVariant &v) {
+               const QVariantMap map = v.toMap();
+               return map.size() <= 10000 && std::all_of(map.cbegin(), map.cend(), [](const QVariant &x) {
+                          return x.toInt() >= 0 && x.toInt() <= 400;
+                      });
+           }});
+    s.add({kSoundsEnabled, SettingType::Bool, true, {}});
+    s.add({kSoundsVolume, SettingType::Int, 80, range(0, 100)});
+    s.add({kPushToTalkSounds, SettingType::Bool, true, {}});
+    s.add({kSoundPack, SettingType::String, QString(), [](const QVariant &v) {
+               const QString name = v.toString();
+               return name.size() <= 64 && !name.contains(QLatin1Char('/')) && !name.contains(QLatin1Char('\\')) &&
+                      name != QStringLiteral("..");
+           }});
     return s;
 }
 

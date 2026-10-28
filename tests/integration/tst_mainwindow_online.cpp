@@ -3,6 +3,9 @@
 // the channel tree, chat, private messages, announcements and accessibility while
 // connected. Dialogs are replaced by the window's test hooks.
 
+#include "../unit/AudioTestUtil.h"
+
+#include "opentalk/audio/AudioEngine.h"
 #include "opentalk/client/Connection.h"
 #include "opentalk/security/PasswordHash.h"
 #include "opentalk/security/Tls.h"
@@ -11,6 +14,7 @@
 #include "opentalk/storage/ClientSettings.h"
 #include "opentalk/storage/ServerProfiles.h"
 #include "opentalk/storage/SettingsStore.h"
+#include "opentalk/ui/AudioController.h"
 #include "opentalk/ui/ChannelTree.h"
 #include "opentalk/ui/ConnectDialog.h"
 #include "opentalk/ui/MainWindow.h"
@@ -126,7 +130,8 @@ private slots:
         m_settings = std::make_unique<storage::SettingsStore>(storage::client::schema(), m_paths->clientSettingsFile());
         m_settings->load();
         m_profiles = std::make_unique<storage::ServerProfileStore>(m_paths->serverProfilesFile());
-        m_window = std::make_unique<ui::MainWindow>(*m_settings, *m_paths, *m_profiles);
+        m_window = std::make_unique<ui::MainWindow>(*m_settings, *m_paths, *m_profiles,
+                                                    std::make_unique<audio::SyntheticAudioBackend>());
         m_trustQuestions.clear();
         m_errors.clear();
         m_spoken.clear();
@@ -320,6 +325,81 @@ private slots:
         QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QStringLiteral(", "))));
         ui::CreateChannelDialog guestDialog(QStringLiteral("Server"), false);
         QVERIFY(!guestDialog.persistent());
+    }
+
+    void voiceWithTheWindow()
+    {
+        m_settings->setValue(storage::client::kAnnounceTalking, true);
+        m_settings->setValue(storage::client::kAnnouncePresence, true);
+        m_window->connectToServer(profile(), QString(), false);
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->connection().isVoiceReady(), kWaitMs);
+
+        // Another person talks with a 600 Hz tone.
+        client::Connection speaker;
+        client::ConnectOptions o;
+        o.host = QStringLiteral("127.0.0.1");
+        o.port = m_server->serverPort();
+        o.trust = security::ServerTrust::pinned(m_server->certificateFingerprint());
+        o.credentials.name = QStringLiteral("Speaker");
+        o.autoReconnect = false;
+        speaker.connectToServer(o);
+        QTRY_VERIFY_WITH_TIMEOUT(speaker.isVoiceReady(), kWaitMs);
+        audio::AudioEngine speakerEngine(
+            std::make_unique<audio::SyntheticAudioBackend>([](qint64 i) { return test::sine(i, 600.0); }));
+        audio::AudioSettings settings;
+        settings.mode = audio::TransmitMode::Continuous;
+        settings.soundsEnabled = false;
+        speakerEngine.setSettings(settings);
+        connect(&speakerEngine, &audio::AudioEngine::packetReady, &speaker,
+                [&](audio::StreamType type, quint16 sequence, const QByteArray &opus) {
+                    speaker.sendAudio(static_cast<protocol::AudioStream>(type), sequence, opus);
+                });
+        int heardBySpeaker = 0;
+        connect(&speaker, &client::Connection::audioReceived, &speaker,
+                [&](const protocol::AudioData &) { ++heardBySpeaker; });
+        speakerEngine.setTransmitAllowed(true);
+        speakerEngine.start();
+
+        const quint32 speakerId = speaker.serverState().selfId();
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->channelTree()->isUserTalking(speakerId), kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(m_spoken.contains(QStringLiteral("Speaker talking")), kWaitMs);
+        auto &windowDevice = dynamic_cast<audio::SyntheticAudioBackend &>(m_window->audio().engine().backend());
+        QTRY_VERIFY_WITH_TIMEOUT(
+            [&] {
+                const QVector<float> out = windowDevice.recordedOutput();
+                const qsizetype n = std::min<qsizetype>(out.size(), 48 * 400);
+                return test::toneStrength(out.constData() + (out.size() - n), n, 600.0) > 0.1;
+            }(),
+            kWaitMs);
+
+        // Per-user volume: silencing the speaker for this window only.
+        m_window->audio().setUserVolume(speakerId, 0);
+        QCOMPARE(m_window->audio().userVolume(speakerId), 0);
+        QTest::qWait(400);
+        windowDevice.clearRecording();
+        QTest::qWait(300);
+        const QVector<float> silenced = windowDevice.recordedOutput();
+        QVERIFY(test::toneStrength(silenced, 600.0) < 0.01);
+        m_window->audio().setUserVolume(speakerId, 100);
+
+        // The window talks with Ctrl+T (push-to-talk mode has no key yet).
+        speakerEngine.stop();
+        QTRY_VERIFY_WITH_TIMEOUT(!m_window->channelTree()->isUserTalking(speakerId), kWaitMs);
+        windowDevice.setGenerator([](qint64 i) { return test::sine(i, 700.0); });
+        QVERIFY(m_window->voiceStatusText().isEmpty());
+        m_window->activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(m_window.get()));
+        QTest::keyClick(m_window.get(), Qt::Key_T, Qt::ControlModifier);
+        QTRY_VERIFY_WITH_TIMEOUT(heardBySpeaker > 10, kWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->voiceStatusText(), QStringLiteral("Talking"), kWaitMs);
+        QTest::keyClick(m_window.get(), Qt::Key_M, Qt::ControlModifier); // mute microphone
+        QCOMPARE(m_window->voiceStatusText(), QStringLiteral("Microphone muted"));
+        QTest::qWait(200);
+        const int afterMute = heardBySpeaker;
+        QTest::qWait(300);
+        QVERIFY(heardBySpeaker <= afterMute + 1);
+        QVERIFY(m_spoken.contains(QStringLiteral("Microphone muted")));
+        speaker.disconnectFromServer();
     }
 };
 

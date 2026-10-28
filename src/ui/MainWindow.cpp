@@ -6,6 +6,8 @@
 #include "opentalk/storage/ClientSettings.h"
 #include "opentalk/storage/SettingsStore.h"
 #include "opentalk/ui/AnnouncementQueue.h"
+#include "opentalk/ui/AudioController.h"
+#include "opentalk/ui/AudioDialogs.h"
 #include "opentalk/ui/ChannelTree.h"
 #include "opentalk/ui/ConnectDialog.h"
 #include "opentalk/ui/SettingsDialog.h"
@@ -62,7 +64,8 @@ QString timestamp(qint64 msSinceEpoch = 0)
 } // namespace
 
 MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths &paths,
-                       storage::ServerProfileStore &profiles, QWidget *parent)
+                       storage::ServerProfileStore &profiles, std::unique_ptr<audio::AudioBackend> audioBackend,
+                       QWidget *parent)
     : QMainWindow(parent)
     , m_settings(settings)
     , m_paths(paths)
@@ -75,6 +78,9 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
     m_statusLabel = new QLabel(this);
     m_statusLabel->setAccessibleName(tr("Connection status"));
     statusBar()->addWidget(m_statusLabel, 1);
+    m_voiceLabel = new QLabel(this);
+    m_voiceLabel->setAccessibleName(tr("Voice status"));
+    statusBar()->addPermanentWidget(m_voiceLabel);
 
     m_announcements = new AnnouncementQueue(
         [this](const QString &text) {
@@ -142,11 +148,13 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
         scheduleRefresh();
         appendHistory(tr("%1 joined the server.").arg(user.name));
         m_announcements->userJoined(user.name);
+        playSound(audio::EventSound::UserJoinedServer);
     });
     connect(&state, &client::ClientState::userLeft, this, [this](const protocol::UserInfo &user) {
         scheduleRefresh();
         appendHistory(tr("%1 left the server.").arg(user.name));
         m_announcements->userLeft(user.name);
+        playSound(audio::EventSound::UserLeftServer);
     });
     connect(&state, &client::ClientState::userMoved, this, [this](const protocol::UserInfo &user, quint32 from) {
         scheduleRefresh();
@@ -159,9 +167,11 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
         } else if (user.channelId == s.currentChannelId()) {
             appendHistory(tr("%1 joined your channel.").arg(user.name));
             announce(static_cast<int>(Category::Presence), tr("%1 joined your channel").arg(user.name));
+            playSound(audio::EventSound::UserJoinedChannel);
         } else if (from == s.currentChannelId()) {
             appendHistory(tr("%1 left your channel.").arg(user.name));
             announce(static_cast<int>(Category::Presence), tr("%1 left your channel").arg(user.name));
+            playSound(audio::EventSound::UserLeftChannel);
         }
     });
 
@@ -175,6 +185,8 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
     connect(&m_localServer, &client::LocalServer::stopped, this,
             [this] { appendHistory(tr("Your server has stopped.")); });
 
+    buildAudio(std::move(audioBackend));
+
     m_channelTree->showMessage(tr("Not connected to a server"));
     setStatusText(tr("Not connected"));
     updateActions();
@@ -182,7 +194,149 @@ MainWindow::MainWindow(storage::SettingsStore &settings, const storage::AppPaths
     m_channelTree->setFocus(Qt::OtherFocusReason);
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow()
+{
+    // Members are destroyed in reverse order, and the connection still emits signals
+    // while it shuts down; none of them may reach this half-destroyed window.
+    QObject::disconnect(&m_connection, nullptr, this, nullptr);
+    QObject::disconnect(&m_connection.serverState(), nullptr, this, nullptr);
+    QObject::disconnect(&m_localServer, nullptr, this, nullptr);
+    if (m_audio != nullptr) {
+        QObject::disconnect(m_audio, nullptr, this, nullptr);
+    }
+}
+
+void MainWindow::buildAudio(std::unique_ptr<audio::AudioBackend> backend)
+{
+    if (!backend) {
+        backend = audio::createSystemAudioBackend();
+    }
+    m_audio = new AudioController(m_settings, m_paths, m_connection, std::move(backend), this);
+    connect(m_audio, &AudioController::transmittingChanged, this, &MainWindow::updateVoiceStatus);
+    connect(m_audio, &AudioController::talkingChanged, this, [this](quint32 userId, bool talking) {
+        m_channelTree->setUserTalking(userId, talking);
+        if (talking && m_settings.value(storage::client::kAnnounceTalking).toBool()) {
+            announce(static_cast<int>(Category::Presence), tr("%1 talking").arg(userName(userId)));
+        }
+    });
+    connect(m_audio, &AudioController::deviceProblem, this, [this](const QString &message) {
+        if (message == m_lastDeviceProblem) {
+            return; // the engine keeps retrying; say it once
+        }
+        m_lastDeviceProblem = message;
+        const QString text =
+            tr("Audio problem: %1. OpenTalk keeps trying; check the devices in Settings, Audio.").arg(message);
+        appendHistory(text);
+        setStatusText(text);
+    });
+    connect(m_audio, &AudioController::devicesStarted, this, [this] {
+        if (!m_lastDeviceProblem.isEmpty()) {
+            m_lastDeviceProblem.clear();
+            appendHistory(tr("Audio devices are working."));
+        }
+    });
+    m_voicePathTimer.setSingleShot(true);
+    m_voicePathTimer.setInterval(5000);
+    connect(&m_voicePathTimer, &QTimer::timeout, this, [this] {
+        if (m_connection.isVoiceReady() && !m_connection.isVoiceUsingUdp() && m_connection.options().allowUdp) {
+            appendHistory(tr("Voice is using the main connection because UDP does not get through to this server. "
+                             "It works, with a little more delay."));
+        }
+    });
+    connect(&m_connection, &client::Connection::voiceReady, this, [this] { m_voicePathTimer.start(); });
+    connect(&m_connection, &client::Connection::voicePathChanged, this, [this](bool usingUdp) {
+        if (!usingUdp && m_connection.state() == client::ConnectionState::Connected && !m_voicePathTimer.isActive()) {
+            appendHistory(tr("Voice switched to the main connection because UDP stopped getting through."));
+        }
+    });
+    updateVoiceStatus();
+}
+
+void MainWindow::playSound(audio::EventSound sound)
+{
+    if (m_audio != nullptr) {
+        m_audio->playSound(sound);
+    }
+}
+
+QString MainWindow::voiceStatusText() const
+{
+    return m_voiceLabel->text();
+}
+
+void MainWindow::updateVoiceStatus()
+{
+    QStringList parts;
+    if (m_audio->isDeafened()) {
+        parts << tr("Sound muted");
+    }
+    if (m_audio->isMicrophoneMuted()) {
+        parts << tr("Microphone muted");
+    } else if (m_audio->isTransmitting()) {
+        parts << tr("Talking");
+    } else if (m_audio->isTransmitLatched()) {
+        parts << tr("Talk on");
+    }
+    m_voiceLabel->setText(parts.join(QStringLiteral(", ")));
+    if (m_transmitAction != nullptr) {
+        m_transmitAction->setChecked(m_audio->isTransmitLatched());
+        m_muteAction->setChecked(m_audio->isMicrophoneMuted());
+        m_deafenAction->setChecked(m_audio->isDeafened());
+    }
+}
+
+void MainWindow::toggleTransmit()
+{
+    const bool on = !m_audio->isTransmitLatched();
+    m_audio->setTransmitLatched(on);
+    updateVoiceStatus();
+    announce(static_cast<int>(Category::Status), on ? tr("Talking on") : tr("Talking off"));
+}
+
+void MainWindow::toggleMicrophoneMute()
+{
+    const bool muted = !m_audio->isMicrophoneMuted();
+    m_audio->setMicrophoneMuted(muted);
+    updateVoiceStatus();
+    announce(static_cast<int>(Category::Status), muted ? tr("Microphone muted") : tr("Microphone on"));
+}
+
+void MainWindow::toggleDeafen()
+{
+    const bool deafened = !m_audio->isDeafened();
+    m_audio->setDeafened(deafened);
+    updateVoiceStatus();
+    announce(static_cast<int>(Category::Status), deafened ? tr("Sound muted") : tr("Sound on"));
+}
+
+std::optional<quint32> MainWindow::selectedUserId() const
+{
+    if (m_userList->hasFocus() && m_userList->currentItem() != nullptr) {
+        return m_userList->currentItem()->data(kUserIdRole).toUInt();
+    }
+    return m_channelTree->currentUserId();
+}
+
+void MainWindow::openUserVolume()
+{
+    const std::optional<quint32> userId = selectedUserId();
+    if (!userId || *userId == m_connection.serverState().selfId() || !m_connection.serverState().user(*userId)) {
+        return;
+    }
+    const int before = m_audio->userVolume(*userId);
+    UserVolumeDialog dialog(userName(*userId), before, this);
+    connect(&dialog, &UserVolumeDialog::percentChanged, this,
+            [this, id = *userId](int percent) { m_audio->setUserVolume(id, percent); });
+    if (dialog.exec() != QDialog::Accepted) {
+        m_audio->setUserVolume(*userId, before);
+        return;
+    }
+    m_audio->setUserVolume(*userId, dialog.percent());
+    if (!m_settings.isReadOnly()) {
+        m_settings.save();
+    }
+    setStatusText(tr("Volume for %1 is %2%.").arg(userName(*userId)).arg(dialog.percent()));
+}
 
 void MainWindow::buildCentralArea()
 {
@@ -276,8 +430,27 @@ void MainWindow::buildMenus()
         }
     });
     m_privateMessageAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
+    m_userVolumeAction = channelMenu->addAction(tr("&Volume for selected user..."), this, &MainWindow::openUserVolume);
+    m_userVolumeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
     // The same actions are the channel tree's context menu (Shift+F10 or the Menu key).
-    m_channelTree->addActions({m_joinAction, m_createChannelAction, m_deleteChannelAction, m_privateMessageAction});
+    m_channelTree->addActions(
+        {m_joinAction, m_createChannelAction, m_deleteChannelAction, m_privateMessageAction, m_userVolumeAction});
+    m_userList->setContextMenuPolicy(Qt::ActionsContextMenu);
+    m_userList->addActions({m_privateMessageAction, m_userVolumeAction});
+
+    QMenu *audioMenu = menuBar()->addMenu(tr("&Audio"));
+    m_transmitAction =
+        audioMenu->addAction(tr("&Talk (stay on until pressed again)"), this, &MainWindow::toggleTransmit);
+    m_transmitAction->setCheckable(true);
+    m_transmitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_T));
+    m_muteAction = audioMenu->addAction(tr("&Mute microphone"), this, &MainWindow::toggleMicrophoneMute);
+    m_muteAction->setCheckable(true);
+    m_muteAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_M));
+    m_deafenAction = audioMenu->addAction(tr("Mute &everything I hear"), this, &MainWindow::toggleDeafen);
+    m_deafenAction->setCheckable(true);
+    m_deafenAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M));
+    audioMenu->addSeparator();
+    audioMenu->addAction(tr("Audio &settings..."), this, &MainWindow::openAudioSettings);
 
     QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
     const QList<std::pair<QString, Pane>> panes = {
@@ -407,6 +580,7 @@ QString MainWindow::historyText() const
 void MainWindow::reportError(const QString &title, const QString &text)
 {
     appendHistory(text);
+    playSound(audio::EventSound::Error);
     if (m_errorReporter) {
         m_errorReporter(title, text);
     }
@@ -461,6 +635,7 @@ void MainWindow::connectToServer(const storage::ServerProfile &profile, const QS
     options.credentials.password = password;
     options.session.clientName = QStringLiteral("OpenTalk");
     options.session.clientVersion = QStringLiteral(OPENTALK_VERSION_STRING);
+    options.allowUdp = m_settings.value(storage::client::kUseUdp).toBool();
     m_channelTree->showMessage(tr("Connecting to %1...").arg(profile.name));
     m_connection.connectToServer(options);
 }
@@ -588,12 +763,14 @@ void MainWindow::onConnected()
                              .arg(serverDisplayName(), state.selfName(), channelPath(state.currentChannelId()));
     appendHistory(text);
     setStatusText(text);
+    playSound(audio::EventSound::Connected);
     m_channelTree->setFocus(Qt::OtherFocusReason);
 }
 
 void MainWindow::onDisconnected(const client::DisconnectInfo &info)
 {
     setWindowTitle(QStringLiteral("OpenTalk"));
+    playSound(audio::EventSound::Disconnected);
     m_channelTree->showMessage(tr("Not connected to a server"));
     m_userList->clear();
     m_requestDescriptions.clear();
@@ -631,6 +808,9 @@ void MainWindow::onConnectionLost(const client::DisconnectInfo &info, int attemp
     m_channelTree->showMessage(tr("Connection lost. Reconnecting..."));
     m_userList->clear();
     const int seconds = std::max(1, (delayMs + 500) / 1000);
+    if (attempt == 1) {
+        playSound(audio::EventSound::Disconnected);
+    }
     appendHistory(tr("Connection lost (%1).").arg(info.detail));
     setStatusText(tr("Connection lost. Trying again in %n second(s), attempt %1.", nullptr, seconds).arg(attempt));
 }
@@ -706,6 +886,7 @@ void MainWindow::updateActions()
     m_deleteChannelAction->setEnabled(connected && role == Role::Admin && channelId &&
                                       *channelId != protocol::kRootChannelId);
     m_privateMessageAction->setEnabled(connected);
+    m_userVolumeAction->setEnabled(connected);
 }
 
 // ------------------------------------------------------------------- requests
@@ -873,6 +1054,9 @@ void MainWindow::onTextReceived(const protocol::TextMessage &message)
     m_history->appendPlainText(QStringLiteral("[%1] %2").arg(timestamp(message.timestampMs), line));
     if (!fromMe) {
         announce(static_cast<int>(Category::Message), spoken);
+        playSound(message.target == protocol::TextTarget::Channel ? audio::EventSound::ChannelMessage
+                  : message.target == protocol::TextTarget::User  ? audio::EventSound::PrivateMessage
+                                                                  : audio::EventSound::ServerMessage);
     }
 }
 
@@ -880,7 +1064,20 @@ void MainWindow::onTextReceived(const protocol::TextMessage &message)
 
 void MainWindow::openSettings()
 {
-    SettingsDialog dialog(m_settings, m_paths, this);
+    openSettingsAt(QString());
+}
+
+void MainWindow::openAudioSettings()
+{
+    openSettingsAt(tr("Audio"));
+}
+
+void MainWindow::openSettingsAt(const QString &category)
+{
+    SettingsDialog dialog(m_settings, m_paths, m_audio, this);
+    if (!category.isEmpty()) {
+        dialog.selectCategory(category);
+    }
     dialog.exec();
 }
 
@@ -909,6 +1106,7 @@ void MainWindow::saveLayout()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     m_connection.disconnectFromServer();
+    m_audio->engine().stop();
     m_localServer.stop(); // finishes in the background; the destructor waits briefly
     saveLayout();
     if (!m_settings.isReadOnly()) {

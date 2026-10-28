@@ -18,6 +18,7 @@ opentalk_add_test(tst_settingsstore LIBS OpenTalk::Storage)
 opentalk_add_test(tst_serverprofiles LIBS OpenTalk::Storage)
 opentalk_add_test(tst_mainwindow LIBS OpenTalk::Ui)
 opentalk_add_test(tst_announcements LIBS OpenTalk::Ui)
+opentalk_add_test(tst_pushtotalk LIBS OpenTalk::Ui)
 opentalk_add_test(tst_audio_core LIBS OpenTalk::Audio)
 # Tests that reach into the audio library's internals also need Opus directly.
 target_link_libraries(tst_audio_core PRIVATE OpenTalk::Opus)

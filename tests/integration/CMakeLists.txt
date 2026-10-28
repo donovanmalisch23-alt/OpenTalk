@@ -28,7 +28,7 @@ set_tests_properties(tst_chat_session PROPERTIES TIMEOUT 180)
 
 qt_add_executable(tst_mainwindow_online tst_mainwindow_online.cpp)
 target_link_libraries(tst_mainwindow_online PRIVATE
-    Qt6::Test OpenTalk::Ui OpenTalk::Server OpenTalk::Security OpenTalk::CompilerOptions)
+    Qt6::Test OpenTalk::Ui OpenTalk::Server OpenTalk::Security OpenTalk::Audio OpenTalk::CompilerOptions)
 target_compile_definitions(tst_mainwindow_online PRIVATE
     OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data"
     OPENTALK_SERVER_EXECUTABLE="$<TARGET_FILE:opentalk_server_app>")

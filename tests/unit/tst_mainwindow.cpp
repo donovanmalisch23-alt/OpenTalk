@@ -6,6 +6,7 @@
 #include "opentalk/storage/ClientSettings.h"
 #include "opentalk/storage/ServerProfiles.h"
 #include "opentalk/storage/SettingsStore.h"
+#include "opentalk/ui/AudioController.h"
 #include "opentalk/ui/MainWindow.h"
 #include "opentalk/ui/SettingsDialog.h"
 
@@ -17,6 +18,7 @@
 #include <QComboBox>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPushButton>
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -74,7 +76,7 @@ private slots:
 
     void everyFocusableControlHasAnAccessibleName()
     {
-        ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
         window.show();
         const QStringList problems = unnamedFocusableWidgets(&window);
         QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QStringLiteral(", "))));
@@ -82,7 +84,7 @@ private slots:
 
     void paneShortcutsAreAssignedAndWork()
     {
-        ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
         window.show();
         window.activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(&window));
@@ -101,7 +103,7 @@ private slots:
 
     void f6CyclesThroughPanesInVisualOrder()
     {
-        ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
         window.show();
         window.activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(&window));
@@ -119,7 +121,7 @@ private slots:
 
     void sendingWhileDisconnectedExplainsWhyAndKeepsText()
     {
-        ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
         window.show();
         auto *input = qobject_cast<QLineEdit *>(window.paneWidget(ui::MainWindow::Pane::MessageInput));
         QVERIFY(input != nullptr);
@@ -132,7 +134,7 @@ private slots:
     void closingSavesLayout()
     {
         {
-            ui::MainWindow window(*m_settings, *m_paths, *m_profiles);
+            ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
             window.show();
             window.close();
         }
@@ -167,7 +169,7 @@ private slots:
     void settingsDialogAppliesAndSaves()
     {
         ui::SettingsDialog dialog(*m_settings, *m_paths);
-        auto *combo = dialog.findChild<QComboBox *>();
+        auto *combo = dialog.findChild<QComboBox *>(QStringLiteral("logLevel"));
         QVERIFY(combo != nullptr);
         combo->setCurrentIndex(combo->findData(QStringLiteral("debug")));
         const QList<QCheckBox *> boxes = dialog.findChildren<QCheckBox *>();
@@ -181,6 +183,53 @@ private slots:
         QCOMPARE(reloaded.value(storage::client::kLogLevel).toString(), QStringLiteral("debug"));
         QCOMPARE(reloaded.value(storage::client::kRestoreWindowLayout).toBool(), false);
         QCOMPARE(reloaded.value(storage::client::kAnnounceStatusChanges).toBool(), false);
+    }
+
+    void audioSettingsAreSaved()
+    {
+        ui::SettingsDialog dialog(*m_settings, *m_paths);
+        dialog.setKeyCapture([] { return std::optional<QKeySequence>(QKeySequence(Qt::Key_F12)); });
+        QVERIFY(dialog.selectCategory(QStringLiteral("Audio")));
+        QPushButton *change = nullptr;
+        for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
+            if (QString(button->text()).remove(QLatin1Char('&')).contains(QStringLiteral("Change key"))) {
+                change = button;
+            }
+        }
+        QVERIFY(change != nullptr);
+        change->click();
+        auto *mode = dialog.findChild<QComboBox *>(QStringLiteral("transmitMode"));
+        QVERIFY(mode != nullptr);
+        mode->setCurrentIndex(mode->findData(storage::client::kTransmitVoiceActivation));
+        QVERIFY(dialog.apply());
+
+        storage::SettingsStore reloaded(storage::client::schema(), m_paths->clientSettingsFile());
+        reloaded.load();
+        QCOMPARE(reloaded.value(storage::client::kPushToTalkKey).toString(), QStringLiteral("F12"));
+        QCOMPARE(reloaded.value(storage::client::kTransmitMode).toString(), storage::client::kTransmitVoiceActivation);
+    }
+
+    void audioMenuTogglesAndAnnounces()
+    {
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
+        QStringList spoken;
+        window.setAnnouncementHook([&spoken](const QString &text) { spoken.append(text); });
+        window.show();
+        window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        QTest::keyClick(&window, Qt::Key_M, Qt::ControlModifier);
+        QVERIFY(window.audio().isMicrophoneMuted());
+        QCOMPARE(window.voiceStatusText(), QStringLiteral("Microphone muted"));
+        QTest::keyClick(&window, Qt::Key_M, Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(window.audio().isDeafened());
+        QCOMPARE(window.voiceStatusText(), QStringLiteral("Sound muted, Microphone muted"));
+        QTest::keyClick(&window, Qt::Key_M, Qt::ControlModifier);
+        QTest::keyClick(&window, Qt::Key_M, Qt::ControlModifier | Qt::ShiftModifier);
+        QTest::keyClick(&window, Qt::Key_T, Qt::ControlModifier);
+        QVERIFY(window.audio().isTransmitLatched());
+        QCOMPARE(window.voiceStatusText(), QStringLiteral("Talk on")); // not connected, so not sending
+        QTRY_VERIFY(spoken.contains(QStringLiteral("Talking on")));
+        QVERIFY(spoken.contains(QStringLiteral("Microphone muted")));
     }
 };
 

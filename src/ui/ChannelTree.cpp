@@ -102,6 +102,9 @@ void ChannelTree::rebuild(const client::ClientState &state, const QString &serve
                 item, {userLabel(user.name, user.id == state.selfId(), static_cast<int>(user.role))});
             userItem->setData(0, kKindRole, static_cast<int>(ItemKind::User));
             userItem->setData(0, kIdRole, user.id);
+            if (m_talking.contains(user.id)) {
+                applyTalking(userItem, true);
+            }
         }
     }
     // Users come before sub-channels inside each channel; sort sub-channels by name.
@@ -171,6 +174,27 @@ std::optional<quint32> ChannelTree::currentUserId() const
 {
     return currentKind() == ItemKind::User ? std::optional<quint32>(currentItem()->data(0, kIdRole).toUInt())
                                            : std::nullopt;
+}
+
+void ChannelTree::setUserTalking(quint32 userId, bool talking)
+{
+    if (talking) {
+        m_talking.insert(userId);
+    } else {
+        m_talking.remove(userId);
+    }
+    if (QTreeWidgetItem *item = findItem(ItemKind::User, userId)) {
+        applyTalking(item, talking);
+    }
+}
+
+void ChannelTree::applyTalking(QTreeWidgetItem *item, bool talking)
+{
+    QFont font = item->font(0);
+    font.setBold(talking);
+    item->setFont(0, font);
+    item->setData(0, Qt::AccessibleDescriptionRole, talking ? tr("talking") : QString());
+    item->setToolTip(0, talking ? tr("Talking") : QString());
 }
 
 void ChannelTree::selectChannel(quint32 channelId)

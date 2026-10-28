@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include <QSet>
 #include <QTreeWidget>
 
 #include <optional>
@@ -31,6 +32,11 @@ public:
     std::optional<quint32> currentChannelId() const;
     std::optional<quint32> currentUserId() const;
     void selectChannel(quint32 channelId);
+    /// Marks a user as talking or not, in place (no rebuild, focus and position stay).
+    /// Shown in bold with a "talking" description; the item's name does not change, so
+    /// a screen reader does not re-read the focused item every time someone speaks.
+    void setUserTalking(quint32 userId, bool talking);
+    bool isUserTalking(quint32 userId) const { return m_talking.contains(userId); }
 
     /// The visible text of an item, as a screen reader will read it.
     static QString channelLabel(const QString &name, int userCount, bool hasPassword, bool persistent);
@@ -42,6 +48,9 @@ signals:
 
 private:
     QTreeWidgetItem *findItem(ItemKind kind, quint32 id) const;
+    void applyTalking(QTreeWidgetItem *item, bool talking);
+
+    QSet<quint32> m_talking;
 };
 
 } // namespace opentalk::ui

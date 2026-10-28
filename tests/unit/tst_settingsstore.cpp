@@ -22,6 +22,7 @@ SettingsSchema testSchema(int version = 2)
                 [](const QVariant &v) { return v.toInt() >= 0 && v.toInt() <= 10; }});
     schema.add({QStringLiteral("a/name"), SettingType::String, QStringLiteral("default"), {}});
     schema.add({QStringLiteral("a/blob"), SettingType::ByteArray, QByteArray(), {}});
+    schema.add({QStringLiteral("a/map"), SettingType::IntMap, QVariantMap(), {}});
     return schema;
 }
 
@@ -101,6 +102,8 @@ private slots:
             QVERIFY(store.setValue(QStringLiteral("a/count"), 9));
             QVERIFY(store.setValue(QStringLiteral("a/name"), QStringLiteral("Ünïcødé")));
             QVERIFY(store.setValue(QStringLiteral("a/blob"), QByteArray("\x00\x01\xff", 3)));
+            QVERIFY(store.setValue(QStringLiteral("a/map"), QVariantMap{{QStringLiteral("alice"), 150}}));
+            QVERIFY(!store.setValue(QStringLiteral("a/map"), QVariantMap{{QStringLiteral("x"), QStringLiteral("1")}}));
             QVERIFY(store.save());
         }
         SettingsStore store(testSchema(), path());
@@ -109,6 +112,7 @@ private slots:
         QCOMPARE(store.value(QStringLiteral("a/count")), QVariant(9));
         QCOMPARE(store.value(QStringLiteral("a/name")), QVariant(QStringLiteral("Ünïcødé")));
         QCOMPARE(store.value(QStringLiteral("a/blob")), QVariant(QByteArray("\x00\x01\xff", 3)));
+        QCOMPARE(store.value(QStringLiteral("a/map")).toMap().value(QStringLiteral("alice")), QVariant(150));
     }
 
     void setValueValidatesAndSignals()
@@ -132,11 +136,12 @@ private slots:
         writeFile(path(), settingsJson(2, {{QStringLiteral("a/count"), 99},
                                            {QStringLiteral("a/flag"), QStringLiteral("yes")},
                                            {QStringLiteral("a/name"), QStringLiteral("kept")},
+                                           {QStringLiteral("a/map"), QJsonObject{{QStringLiteral("x"), 1.5}}},
                                            {QStringLiteral("future/key"), QStringLiteral("from a newer build")}}));
         SettingsStore store(testSchema(), path());
         const LoadReport report = store.load();
         QVERIFY(report.status == LoadReport::Status::Loaded);
-        QCOMPARE(report.warnings.size(), 2);
+        QCOMPARE(report.warnings.size(), 3);
         QCOMPARE(store.value(QStringLiteral("a/count")), QVariant(5));
         QCOMPARE(store.value(QStringLiteral("a/flag")), QVariant(false));
         QCOMPARE(store.value(QStringLiteral("a/name")), QVariant(QStringLiteral("kept")));

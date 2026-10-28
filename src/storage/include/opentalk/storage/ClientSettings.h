@@ -23,6 +23,26 @@ inline const QString kLocalServerAllowGuests = QStringLiteral("localServer/allow
 inline const QString kLocalServerAdminName = QStringLiteral("localServer/adminName");
 inline const QString kMainWindowGeometry = QStringLiteral("ui/mainWindowGeometry");
 inline const QString kMainSplitterState = QStringLiteral("ui/mainSplitterState");
+inline const QString kAnnounceTalking = QStringLiteral("accessibility/announceTalking");
+inline const QString kInputDevice = QStringLiteral("audio/inputDevice");
+inline const QString kOutputDevice = QStringLiteral("audio/outputDevice");
+inline const QString kInputVolume = QStringLiteral("audio/inputVolume");
+inline const QString kOutputVolume = QStringLiteral("audio/outputVolume");
+inline const QString kTransmitMode = QStringLiteral("audio/transmitMode");
+inline const QString kPushToTalkKey = QStringLiteral("audio/pushToTalkKey");
+inline const QString kVoiceActivationLevel = QStringLiteral("audio/voiceActivationLevel");
+inline const QString kVoiceBitrate = QStringLiteral("audio/bitrateKbps");
+inline const QString kUseUdp = QStringLiteral("audio/useUdp");
+inline const QString kUserVolumes = QStringLiteral("audio/userVolumes");
+inline const QString kSoundsEnabled = QStringLiteral("sounds/enabled");
+inline const QString kSoundsVolume = QStringLiteral("sounds/volume");
+inline const QString kPushToTalkSounds = QStringLiteral("sounds/pushToTalk");
+inline const QString kSoundPack = QStringLiteral("sounds/pack");
+
+// Values of kTransmitMode.
+inline const QString kTransmitPushToTalk = QStringLiteral("pushToTalk");
+inline const QString kTransmitVoiceActivation = QStringLiteral("voiceActivation");
+inline const QString kTransmitContinuous = QStringLiteral("continuous");
 
 /// Builds the schema for client-settings.json. See docs/reference/client-settings.md.
 SettingsSchema schema();
