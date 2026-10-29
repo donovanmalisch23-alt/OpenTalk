@@ -62,6 +62,7 @@ The first published version: a release candidate for 1.0.0, with everything buil
 
 ### Fixed
 
+- Server: when an account logged in again while still online somewhere else, the server could read freed memory and crash, or log someone in under a wrong session number. Found by an intermittent Windows CI failure; the server's session table no longer moves entries when one is removed, and a new test logs one account in 200 times with 60 others online.
 - A damaged FLAC file could make OpenTalk read outside a buffer when seeking, and a damaged WAV file could make it hang while opening the file (both found by fuzzing, in miniaudio's decoders). The vendored miniaudio carries a small patch for each, recorded in the third-party register. Fuzzing in CI now also reports any input that takes longer than 30 seconds.
 - The fuzz build now instruments the libraries under test, not only the fuzz harnesses.
 - Restoring a backup twice in the same second could overwrite the file being restored.

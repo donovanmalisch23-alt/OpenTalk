@@ -12,6 +12,7 @@
 #include <QTimeZone>
 
 #include <algorithm>
+#include <ranges>
 
 namespace opentalk::server {
 
@@ -116,8 +117,8 @@ bool ServerCore::load(QString *errorMessage)
 
 int ServerCore::onlineUserCount() const
 {
-    return static_cast<int>(std::count_if(m_clients.cbegin(), m_clients.cend(),
-                                          [](const Client &c) { return c.state == ClientState::Online; }));
+    return static_cast<int>(std::ranges::count_if(std::views::values(m_clients),
+                                                  [](const Client &c) { return c.state == ClientState::Online; }));
 }
 
 QList<ChannelInfo> ServerCore::channels() const
@@ -138,7 +139,7 @@ void ServerCore::sessionStarted(quint32 sessionId, const QHostAddress &address)
     client.address = address;
     client.textTokens = m_config.textBurst;
     client.textRefillMs = m_now();
-    m_clients.insert(sessionId, client);
+    m_clients.insert_or_assign(sessionId, client);
 }
 
 void ServerCore::sessionEnded(quint32 sessionId)
@@ -147,8 +148,8 @@ void ServerCore::sessionEnded(quint32 sessionId)
     if (it == m_clients.end()) {
         return;
     }
-    const bool wasOnline = it->state == ClientState::Online;
-    const quint32 channelId = it->user.channelId;
+    const bool wasOnline = it->second.state == ClientState::Online;
+    const quint32 channelId = it->second.user.channelId;
     m_clients.erase(it);
     if (wasOnline) {
         if (auto channel = m_channels.find(channelId); channel != m_channels.end()) {
@@ -165,7 +166,7 @@ void ServerCore::handleMessage(quint32 sessionId, const Message &message)
     if (it == m_clients.end()) {
         return;
     }
-    Client &client = *it;
+    Client &client = it->second;
     switch (client.state) {
     case ClientState::AwaitingAuth:
         if (const auto *auth = std::get_if<Authenticate>(&message)) {
@@ -285,7 +286,7 @@ void ServerCore::loginFailed(quint32 sessionId, const QHostAddress &address, con
 
 bool ServerCore::nameTakenOnline(const QString &name) const
 {
-    return std::any_of(m_clients.cbegin(), m_clients.cend(), [&name](const Client &c) {
+    return std::ranges::any_of(std::views::values(m_clients), [&name](const Client &c) {
         return c.state == ClientState::Online && c.user.name.compare(name, Qt::CaseInsensitive) == 0;
     });
 }
@@ -344,8 +345,11 @@ void ServerCore::authenticate(Client &client, const Authenticate &request)
     client.state = ClientState::Authenticating;
     const QHostAddress address = client.address;
     m_passwords.verify(hash, request.password, this, [this, sessionId, address, usable, account](bool matches) {
-        auto it = m_clients.find(sessionId);
-        if (it == m_clients.end() || it->state != ClientState::Authenticating) {
+        const auto stillAuthenticating = [this, sessionId] {
+            const auto found = m_clients.find(sessionId);
+            return found != m_clients.end() && found->second.state == ClientState::Authenticating;
+        };
+        if (!stillAuthenticating()) {
             return; // disconnected meanwhile
         }
         if (!usable || !matches) {
@@ -360,11 +364,16 @@ void ServerCore::authenticate(Client &client, const Authenticate &request)
         }
         if (Client *existing = onlineAccount(account->id)) {
             // The same account logging in again replaces the old session (for example
-            // after a network change).
-            emit closeSession(existing->id, ErrorCode::NameInUse, QStringLiteral("logged in from somewhere else"));
-            sessionEnded(existing->id);
+            // after a network change). Closing it can end it at once, so `existing` is not
+            // used after that.
+            const quint32 oldSessionId = existing->id;
+            emit closeSession(oldSessionId, ErrorCode::NameInUse, QStringLiteral("logged in from somewhere else"));
+            sessionEnded(oldSessionId);
+            if (!stillAuthenticating()) {
+                return; // closing the old session also ended this one
+            }
         }
-        goOnline(*it, account->username, account->role, account->id, account->bot);
+        goOnline(m_clients.at(sessionId), account->username, account->role, account->id, account->bot);
     });
 }
 
@@ -402,7 +411,7 @@ void ServerCore::goOnline(Client &client, const QString &name, Role role, qint64
     for (const Channel &c : std::as_const(m_channels)) {
         snapshot.channels.append(c.info); // ordered by ID, so parents come before children
     }
-    for (const Client &c : std::as_const(m_clients)) {
+    for (const Client &c : std::views::values(std::as_const(m_clients))) {
         if (c.state == ClientState::Online) {
             snapshot.users.append(c.user);
         }
@@ -449,14 +458,14 @@ QList<quint32> ServerCore::voiceRecipients(quint32 sessionId, AudioStream stream
 
 ServerCore::Client *ServerCore::onlineClient(quint32 id)
 {
-    auto it = m_clients.find(id);
-    return (it != m_clients.end() && it->state == ClientState::Online) ? &*it : nullptr;
+    const auto it = m_clients.find(id);
+    return (it != m_clients.end() && it->second.state == ClientState::Online) ? &it->second : nullptr;
 }
 
 const ServerCore::Client *ServerCore::onlineClient(quint32 id) const
 {
-    auto it = m_clients.constFind(id);
-    return (it != m_clients.cend() && it->state == ClientState::Online) ? &*it : nullptr;
+    const auto it = m_clients.find(id);
+    return (it != m_clients.cend() && it->second.state == ClientState::Online) ? &it->second : nullptr;
 }
 
 ServerCore::Client *ServerCore::onlineAccount(qint64 accountId)
@@ -464,7 +473,7 @@ ServerCore::Client *ServerCore::onlineAccount(qint64 accountId)
     if (accountId == 0) {
         return nullptr;
     }
-    for (Client &c : m_clients) {
+    for (Client &c : std::views::values(m_clients)) {
         if (c.state == ClientState::Online && c.accountId == accountId) {
             return &c;
         }
@@ -882,10 +891,15 @@ void ServerCore::sendText(Client &client, const SendText &request)
 
 void ServerCore::broadcast(const Message &message, quint32 exceptSessionId)
 {
-    const QList<quint32> ids = m_clients.keys();
+    // Sending can end a session, so the IDs are collected first.
+    QList<quint32> ids;
+    ids.reserve(static_cast<qsizetype>(m_clients.size()));
+    for (const quint32 id : std::views::keys(m_clients)) {
+        ids.append(id);
+    }
     for (quint32 id : ids) {
-        const auto it = m_clients.constFind(id);
-        if (id != exceptSessionId && it != m_clients.cend() && it->state == ClientState::Online) {
+        const auto it = m_clients.find(id);
+        if (id != exceptSessionId && it != m_clients.end() && it->second.state == ClientState::Online) {
             emit sendTo(id, message);
         }
     }

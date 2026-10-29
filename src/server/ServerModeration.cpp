@@ -8,6 +8,7 @@
 #include "opentalk/server/ServerDatabase.h"
 
 #include <algorithm>
+#include <ranges>
 #include <type_traits>
 
 namespace opentalk::server {
@@ -157,7 +158,7 @@ bool ServerCore::mayActOn(const Client &actor, moderation::RoleId targetRole, Ca
 QList<ServerCore::Client *> ServerCore::clientsMatching(const Sanction &sanction)
 {
     QList<Client *> result;
-    for (Client &c : m_clients) {
+    for (Client &c : std::views::values(m_clients)) {
         if (c.state == ClientState::Online && moderation::SanctionBook::appliesTo(sanction, subjectOf(c))) {
             result.append(&c);
         }
@@ -208,7 +209,7 @@ void ServerCore::refreshUser(Client &client)
 
 void ServerCore::refreshAllUsers()
 {
-    for (Client &c : m_clients) {
+    for (Client &c : std::views::values(m_clients)) {
         refreshUser(c);
     }
 }
@@ -273,7 +274,7 @@ void ServerCore::audit(const Client *actor, const QString &action, const QString
 
 void ServerCore::notifyHolders(Capability capability, const QString &text, qint64 exceptAccountId)
 {
-    for (const Client &c : std::as_const(m_clients)) {
+    for (const Client &c : std::views::values(std::as_const(m_clients))) {
         if (c.state == ClientState::Online && (exceptAccountId == 0 || c.accountId != exceptAccountId) &&
             can(c, capability)) {
             emit sendTo(c.id, TextMessage{TextTarget::User, 0, c.id, text, m_wallClock()});

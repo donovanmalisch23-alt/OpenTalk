@@ -15,6 +15,7 @@
 #include <QSet>
 
 #include <functional>
+#include <map>
 
 namespace opentalk::server {
 
@@ -215,7 +216,10 @@ private:
     PasswordWorker &m_passwords;
     std::function<qint64()> m_now;
     std::function<qint64()> m_wallClock;
-    QHash<quint32, Client> m_clients;
+    /// A std::map, not a QHash: removing one session must not move the others, because
+    /// references to them are held while sessions end (for example when an account logs
+    /// in again from somewhere else).
+    std::map<quint32, Client> m_clients;
     QMap<quint32, Channel> m_channels;
     QHash<QHostAddress, QList<qint64>> m_failedLogins;
     quint64 m_failedLoginCount = 0; ///< Since start, for the statistics.

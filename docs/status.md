@@ -132,6 +132,8 @@ for i in $(seq 10); do build/linux-debug/tests/integration/tst_chat_session; don
 
 Windows results come from the CI runs linked on the pull request.
 
+`tst_audio_engine`'s Windows 10 echo-removal check can fail when the computer is overloaded (1 of 5 runs with 8 tests at once on 4 cores): the synthetic sound device runs in real time, and a starved audio thread shifts the echo's timing faster than the canceller adapts. It passes when the tests run as CI runs them. On a real Windows 10 computer under heavy load, the same can let some of other people's voices into shared computer audio.
+
 ## Recorded owner decisions
 
 | Date | Decision |

@@ -137,6 +137,42 @@ private slots:
         QVERIFY(h.login(13, QStringLiteral("alice"), false, QString(), attacker));
     }
 
+    void loggingInAgainReplacesTheOldSession()
+    {
+        // The same account logging in again ends its old session. That once moved other
+        // sessions around in memory while the new one was still being used, so it ran with
+        // many people online, each time from a new session. (Without the fix this failed in
+        // about 2 of 5 runs with 20 rounds; 200 rounds catch it almost every time.)
+        Harness h;
+        constexpr quint32 kGuests = 60;
+        constexpr quint32 kRounds = 200;
+        for (quint32 i = 1; i <= kGuests; ++i) {
+            QVERIFY(h.login(i, QStringLiteral("guest%1").arg(i), true));
+        }
+        quint32 previous = 0;
+        for (quint32 session = 1000; session < 1000 + kRounds; ++session) {
+            QVERIFY2(h.login(session, QStringLiteral("alice")), qPrintable(QString::number(session)));
+            const auto result = h.last<AuthResult>(session);
+            QCOMPARE(result->userId, session);
+            QCOMPARE(result->displayName, QStringLiteral("alice"));
+            if (previous != 0) {
+                QVERIFY(h.closed.value(previous).first == ErrorCode::NameInUse);
+                QVERIFY(h.closed.value(previous).second.contains(QStringLiteral("somewhere else")));
+                QVERIFY(h.all<UserLeft>(1).contains(UserLeft{previous}));
+            }
+            QCOMPARE(h.core->onlineUserCount(), static_cast<int>(kGuests) + 1);
+            previous = session;
+        }
+        // Everyone else saw each new alice arrive and is still there.
+        int joined = 0;
+        for (const UserJoined &j : h.all<UserJoined>(1)) {
+            joined += j.user.name == QStringLiteral("alice") ? 1 : 0;
+        }
+        QCOMPARE(joined, static_cast<int>(kRounds));
+        h.send(kGuests, SendText{1, TextTarget::Channel, kRootChannelId, QStringLiteral("still here")});
+        QVERIFY(h.has<TextMessage>(previous));
+    }
+
     void onlyLoginIsAllowedFirst()
     {
         Harness h;
