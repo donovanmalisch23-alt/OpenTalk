@@ -44,6 +44,9 @@ VIAddVersionKey "CompanyName" "The OpenTalk contributors"
 VIAddVersionKey "LegalCopyright" "GNU General Public License version 3"
 
 !define MUI_ABORTWARNING
+; makensis runs from this script's folder, so the path is relative to it.
+!define MUI_ICON "..\..\src\app\resources\opentalk.ico"
+!define MUI_UNICON "..\..\src\app\resources\opentalk.ico"
 !define MUI_WELCOMEPAGE_TEXT "This installs OpenTalk ${DISPLAY_VERSION}, an accessible voice and text chat program, for you only. No administrator rights are needed.$\r$\n$\r$\nTo use OpenTalk from a USB stick or a folder without installing, download the portable zip instead."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\OpenTalk.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Start OpenTalk now"

@@ -1,6 +1,6 @@
 # OpenTalk SDK
 
-**Status: draft (SDK 0.4).** It is implemented and covered by tests through two examples run against a real server: `opentalk-ping` (`tst_server_process`) and `opentalk-greeter-bot` (`tst_examples`). It can log in (account or guest), list channels and users (with their role, mutes and whether they are bots), join channels, send and receive channel, private and server-wide messages, send and receive audio, play audio files into a channel, reconnect automatically, and measure round-trip time.
+**Status: draft (SDK 0.5).** It is implemented and covered by tests against a real server: through two examples, `opentalk-ping` (`tst_server_process`) and `opentalk-greeter-bot` (`tst_examples`), and directly (`tst_sdk`). It can log in (account or guest), list channels and users (with their role, mutes, status and whether they are bots), join, create and delete channels, send and receive channel, private and server-wide messages, set a status message, send and receive audio, play audio files into a channel, move people and apply or lift sanctions, reconnect automatically, and measure round-trip time.
 
 The SDK is the supported way for bots, tools and other programs to talk to OpenTalk servers. The OpenTalk desktop application is built on the same internal libraries.
 
@@ -70,6 +70,25 @@ QObject::connect(&timer, &QTimer::timeout, [&] {
 ```
 
 `durationMs()`, `positionMs()` and `seekMs()` allow a player with progress and skipping. Only open files your bot chose itself, or names checked against a list: the example bot plays only names it found in its own folder.
+
+## Channels and moderation (since 0.5)
+
+A bot whose account has a moderator or administrator role can manage channels and people. The server checks every request exactly as it would for a person with that role; a refused request ends in `requestFinished()` with `succeeded` false and the reason.
+
+```cpp
+// A channel; its ID arrives as requestResult().
+const quint64 create = client.createChannel("Quiet room");
+// Move someone who is online, then mute them for ten minutes with a reason.
+client.moveUser(userId, channelId);
+const quint64 mute = client.applySanction(userId, opentalk::sdk::Sanction::Mute, "Spamming", 600);
+QObject::connect(&client, &opentalk::sdk::Client::requestResult, [&](quint64 request, quint64 id) {
+    if (request == mute) { sanctionId = id; } // for liftSanction(sanctionId, "...") later
+});
+```
+
+- `applySanction()` and `liftSanction()` need a reason and return 0 without one. Everyone sanctioned is told the reason, and the audit log records the bot's account as the moderator.
+- `durationSeconds` 0 means until lifted; `channelId` 0 means the whole server.
+- `deleteChannel()` needs an administrator. Temporary channels are removed by the server when the last person leaves.
 
 ## Bots
 

@@ -218,6 +218,7 @@ private:
     QHash<quint32, Client> m_clients;
     QMap<quint32, Channel> m_channels;
     QHash<QHostAddress, QList<qint64>> m_failedLogins;
+    quint64 m_failedLoginCount = 0; ///< Since start, for the statistics.
     quint32 m_nextTemporaryChannelId = 0x80000000u;
     /// A real Argon2id hash of a random password. Unknown usernames are checked against
     /// it, so a failed login takes as long whether or not the account exists.

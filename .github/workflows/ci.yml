@@ -69,6 +69,22 @@ jobs:
       - name: Test
         run: ctest --preset windows-msvc-release
 
+      - name: Show the complete output of failed tests
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = "build/windows-msvc-release/Testing/Temporary/LastTest.log"
+          if (-not (Test-Path $log)) { return }
+          # LastTest.log has one block per test; print the blocks of tests that failed.
+          $block = @()
+          foreach ($line in Get-Content $log) {
+            $block += $line
+            if ($line -match '^Test (Passed|Failed)\.|^"[^"]+" end time') {
+              if (($block -join "`n") -match 'Test Failed\.') { $block | Write-Host }
+              $block = @()
+            }
+          }
+
       - name: Package portable build
         shell: pwsh
         run: |
@@ -85,8 +101,16 @@ jobs:
           windeployqt --release --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw `
             "$stage/OpenTalk.exe" "$stage/opentalk-server.exe" "$stage/opentalk-ping.exe" "$stage/opentalk-audio-bench.exe" `
             "$stage/opentalk-greeter-bot.exe"
-          # OpenSSL, libsodium and Opus from vcpkg (the same build the tests used).
-          Copy-Item "$env:OPENSSL_BIN/*.dll" $stage/
+          # OpenSSL, libsodium, Opus and speexdsp from vcpkg (the same build the tests used). Only
+          # these: vcpkg's bin folder also holds DLLs OpenTalk does not use (OpenSSL's legacy
+          # provider, pkgconf), which must not be shipped.
+          $needed = '^(libssl-3-x64|libcrypto-3-x64|libsodium|opus|libspeexdsp|speexdsp)\.dll$'
+          $libs = Get-ChildItem -Path $env:OPENSSL_BIN -Filter *.dll | Where-Object { $_.Name -match $needed }
+          foreach ($name in "libssl-3-x64.dll", "libcrypto-3-x64.dll", "libsodium.dll", "opus.dll") {
+            if (-not ($libs.Name -contains $name)) { throw "vcpkg did not build $name" }
+          }
+          if (-not ($libs.Name -match 'speexdsp')) { throw "vcpkg did not build speexdsp" }
+          $libs | Copy-Item -Destination $stage/
           # windeployqt skips Qt's OpenSSL TLS plugin because OpenSSL is not part of Qt; copy it.
           $plugin = Get-ChildItem -Path "$env:RUNNER_WORKSPACE/Qt" -Recurse -Filter qopensslbackend.dll | Select-Object -First 1
           if (-not $plugin) { throw "qopensslbackend.dll not found in the Qt installation" }
@@ -116,7 +140,7 @@ jobs:
             Copy-Item $file "$stage/licenses/$port.txt"
           }
           # Every DLL in the package must be one the notices cover.
-          $known = '^(Qt6\w+|libssl-3-x64|libcrypto-3-x64|libsodium|opus|speexdsp|vcruntime140(_1)?|msvcp140(_\w+)?|concrt140|vccorlib140|q\w+|d3dcompiler_47|opengl32sw|dxcompiler|dxil)\.dll$'
+          $known = '^(Qt6\w+|libssl-3-x64|libcrypto-3-x64|libsodium|opus|(lib)?speexdsp|vcruntime140(_1)?|msvcp140(_\w+)?|concrt140|vccorlib140|q\w+|d3dcompiler_47|opengl32sw|dxcompiler|dxil)\.dll$'
           $unknown = Get-ChildItem -Path $stage -Recurse -Filter *.dll | Where-Object { $_.Name -notmatch $known }
           if ($unknown) { throw "DLLs without a licence notice: $($unknown.Name -join ', ')" }
 

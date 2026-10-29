@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -1188,6 +1189,10 @@ public:
                 tr("Voice packets received: %1").arg(s.voicePacketsIn),
                 tr("Voice packets sent: %1").arg(s.voicePacketsOut),
                 tr("Voice packets refused: %1").arg(s.voicePacketsRejected),
+                tr("Data received: %1").arg(QLocale().formattedDataSize(static_cast<qint64>(s.bytesIn))),
+                tr("Data sent: %1").arg(QLocale().formattedDataSize(static_cast<qint64>(s.bytesOut))),
+                tr("Failed logins: %1").arg(s.failedLogins),
+                tr("Connections ended by errors: %1").arg(s.connectionErrors),
                 tr("Active sanctions: %1").arg(s.activeSanctions),
                 tr("Open reports: %1").arg(s.openReports),
                 tr("Appeals waiting: %1").arg(s.openAppeals),

@@ -126,6 +126,9 @@ bool Server::start(QString *errorMessage)
     });
     m_core->setStatsProvider([this](protocol::ServerStatsInfo &stats) {
         stats.connections = static_cast<quint32>(m_peers.size());
+        stats.bytesIn = m_bytesIn;
+        stats.bytesOut = m_bytesOut;
+        stats.connectionErrors = m_connectionErrors;
         if (m_voice) {
             const VoiceRouter::Stats voice = m_voice->stats();
             stats.voicePacketsIn = voice.receivedUdp + voice.receivedTunnel;
@@ -164,6 +167,7 @@ bool Server::start(QString *errorMessage)
             [this](const QByteArray &datagram, const QHostAddress &to, quint16 port) {
                 if (m_udp) {
                     m_udp->writeDatagram(datagram, to, port);
+                    m_bytesOut += static_cast<quint64>(datagram.size());
                 }
             });
     connect(m_voice.get(), &VoiceRouter::sendTunnel, this, [this](quint32 id, const protocol::AudioData &audio) {
@@ -194,6 +198,7 @@ bool Server::start(QString *errorMessage)
             connect(m_udp.get(), &QUdpSocket::readyRead, this, [this] {
                 while (m_udp && m_udp->hasPendingDatagrams()) {
                     const QNetworkDatagram datagram = m_udp->receiveDatagram(2048);
+                    m_bytesIn += static_cast<quint64>(datagram.data().size());
                     m_voice->handleDatagram(datagram.data(), datagram.senderAddress(),
                                             static_cast<quint16>(datagram.senderPort()));
                 }
@@ -287,7 +292,10 @@ void Server::acceptConnection(qintptr socketDescriptor)
         peer->session = new ServerSession(m_config.session, m_clock.elapsed(), peer);
         ServerSession *session = peer->session;
         QSslSocket *s = peer->socket;
-        connect(session, &protocol::Session::sendRequested, s, [s](const QByteArray &bytes) { s->write(bytes); });
+        connect(session, &protocol::Session::sendRequested, s, [this, s](const QByteArray &bytes) {
+            m_bytesOut += static_cast<quint64>(bytes.size());
+            s->write(bytes);
+        });
         connect(session, &protocol::Session::closeRequested, s, [s] { s->disconnectFromHost(); });
         connect(session, &ServerSession::established, this, [this, peer] {
             const protocol::Hello &hello = peer->session->clientHello();
@@ -306,6 +314,18 @@ void Server::acceptConnection(qintptr socketDescriptor)
         connect(session, &protocol::Session::closed, this, [this, peer](const CloseInfo &info) {
             qCInfo(lcServer).noquote() << "Session" << peer->id << "closed:" << protocol::toString(info.code)
                                        << info.detail;
+            switch (info.code) {
+            case ErrorCode::ProtocolViolation:
+            case ErrorCode::UnsupportedVersion:
+            case ErrorCode::MalformedMessage:
+            case ErrorCode::RateLimited:
+            case ErrorCode::Timeout:
+            case ErrorCode::InternalError:
+                ++m_connectionErrors;
+                break;
+            default:
+                break;
+            }
             m_voice->removeSession(peer->id);
             m_core->sessionEnded(peer->id);
             emit sessionClosed(peer->id, info);
@@ -318,6 +338,7 @@ void Server::acceptConnection(qintptr socketDescriptor)
     });
     connect(socket, &QSslSocket::readyRead, this, [this, peer] {
         const QByteArray bytes = peer->socket->readAll();
+        m_bytesIn += static_cast<quint64>(bytes.size());
         if (peer->session != nullptr) {
             peer->session->receive(bytes, m_clock.elapsed());
         }

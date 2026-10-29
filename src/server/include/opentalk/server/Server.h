@@ -82,6 +82,14 @@ public:
     quint16 udpPort() const;
     VoiceRouter::Stats voiceStats() const;
 
+    /// Data and errors since start (also shown in Administration, Statistics).
+    struct Traffic {
+        quint64 bytesIn = 0;
+        quint64 bytesOut = 0;
+        quint64 connectionErrors = 0;
+    };
+    Traffic traffic() const { return {m_bytesIn, m_bytesOut, m_connectionErrors}; }
+
 signals:
     void sessionEstablished(quint32 sessionId, const opentalk::protocol::Hello &client);
     void sessionClosed(quint32 sessionId, const opentalk::protocol::CloseInfo &info);
@@ -109,6 +117,10 @@ private:
     QTimer m_shutdownTimer;
     QElapsedTimer m_clock;
     bool m_stopping = false;
+    // For the statistics (Administration, Statistics).
+    quint64 m_bytesIn = 0;
+    quint64 m_bytesOut = 0;
+    quint64 m_connectionErrors = 0;
 };
 
 } // namespace opentalk::server

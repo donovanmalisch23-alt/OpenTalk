@@ -15,6 +15,9 @@ The first published version: a release candidate for 1.0.0, with everything buil
 - Status messages: Server, "Set my status message" (Ctrl+Shift+S) shows a short note after your name for everyone (protocol `SetStatus`, `UserUpdated` and user field 6; SDK `Client::setStatus()` and `User::status`). Refused while text-muted; shares the chat flood limit.
 - Help, "Create a support file": shows, then saves or copies, the version, system, sound devices, plugins, settings and end of the log, leaving out passwords, messages, server addresses, other people's names and personal folders.
 - File, "Export settings" and "Import settings", for moving settings to another computer. The previous settings are kept before an import.
+- SDK 0.5: `createChannel()`, `deleteChannel()`, `moveUser()`, `applySanction()` and `liftSanction()`, with `requestResult()` giving the new channel's or sanction's ID; tested against a real server (`tst_sdk`).
+- Administration, Statistics also shows data received and sent, failed logins and connections ended by errors (protocol: optional statistics fields 13–16).
+- An application icon, OpenTalk's own, on the window, the program and the installer; the program file now carries version details.
 - Only one copy of OpenTalk can use a data folder at a time; starting a second one explains how to switch or use `--data-dir`. After a crash, the next start says so in the history and how to report it.
 - Windows installer (per user, no administrator rights), next to the portable zip. Uninstalling keeps your settings.
 - "Remember my password" in the connect dialog, kept in Windows Credential Manager only, and only after the server accepted it.

@@ -114,6 +114,10 @@ private slots:
         QVERIFY(!h.login(2, QStringLiteral("nobody"), false, QStringLiteral("whatever")));
         QVERIFY(h.closed.value(1).first == ErrorCode::AuthenticationFailed);
         QVERIFY(h.closed.value(1) == h.closed.value(2)); // no hint whether the account exists
+        // Administrators see how many there were.
+        QVERIFY(h.login(3, QStringLiteral("admin"), false, QStringLiteral("admin-pw")));
+        h.send(3, GetServerStats{1});
+        QCOMPARE(h.last<ServerStatsResult>(3)->stats.failedLogins, quint64{2});
     }
 
     void repeatedFailuresAreThrottledPerAddress()

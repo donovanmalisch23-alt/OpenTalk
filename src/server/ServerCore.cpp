@@ -277,6 +277,7 @@ bool ServerCore::tooManyFailedLogins(const QHostAddress &address)
 void ServerCore::loginFailed(quint32 sessionId, const QHostAddress &address, const QString &detail)
 {
     m_failedLogins[address].append(m_now());
+    ++m_failedLoginCount;
     qCInfo(lcServer).noquote() << "Login failed for session" << sessionId << "-" << detail;
     // The client is told only that login failed, never whether the account exists.
     emit closeSession(sessionId, ErrorCode::AuthenticationFailed, QStringLiteral("wrong username or password"));

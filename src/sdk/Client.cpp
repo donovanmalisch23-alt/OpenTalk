@@ -261,7 +261,10 @@ Client::Client(QObject *parent)
             [this](const client::DisconnectInfo &, int attempt, int delayMs) { emit reconnecting(attempt, delayMs); });
     connect(&c, &client::Connection::roundTripMeasured, this, &Client::pingReplied);
     connect(&c, &client::Connection::requestFinished, this,
-            [this](quint64 id, const std::optional<protocol::Error> &error, std::optional<quint32>) {
+            [this](quint64 id, const std::optional<protocol::Error> &error, std::optional<quint32> resultId) {
+                if (!error && resultId) {
+                    emit requestResult(id, *resultId);
+                }
                 emit requestFinished(id, !error.has_value(), error ? error->detail : QString());
             });
 
@@ -393,6 +396,49 @@ quint64 Client::sendDirectMessage(quint32 userId, const QString &text)
 quint64 Client::sendServerMessage(const QString &text)
 {
     return d->connection.sendText(protocol::TextTarget::Server, 0, text);
+}
+
+quint64 Client::createChannel(const QString &name, quint32 parentId, bool persistent, const QString &password)
+{
+    protocol::CreateChannel request;
+    request.parentId = parentId == 0 ? protocol::kRootChannelId : parentId;
+    request.name = name;
+    request.persistent = persistent;
+    request.password = password;
+    return d->connection.sendRequest(request);
+}
+
+quint64 Client::deleteChannel(quint32 channelId)
+{
+    return d->connection.sendRequest(protocol::DeleteChannel{0, channelId});
+}
+
+quint64 Client::moveUser(quint32 userId, quint32 channelId)
+{
+    return d->connection.sendRequest(protocol::MoveUser{0, userId, channelId});
+}
+
+quint64 Client::applySanction(quint32 userId, Sanction sanction, const QString &reason, quint32 durationSeconds,
+                              quint32 channelId)
+{
+    if (reason.trimmed().isEmpty()) {
+        return 0;
+    }
+    protocol::ApplySanction request;
+    request.userId = userId;
+    request.type = static_cast<quint8>(sanction); // the same order as moderation::SanctionType
+    request.channelId = channelId;
+    request.durationSeconds = durationSeconds;
+    request.reason = reason;
+    return d->connection.sendRequest(request);
+}
+
+quint64 Client::liftSanction(quint64 sanctionId, const QString &reason)
+{
+    if (reason.trimmed().isEmpty()) {
+        return 0;
+    }
+    return d->connection.sendRequest(protocol::RevokeSanction{0, sanctionId, reason});
 }
 
 quint64 Client::setStatus(const QString &status)

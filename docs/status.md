@@ -69,6 +69,8 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Plugins as real processes: both directions of messages, menu commands, enforcement of permissions, floods, oversized lines, garbage, hangs and crash loops; the C++ and Python examples | Integration-tested against a real server | `tst_plugins` (10) |
 | Plugins in the app: install, consent, Plugins menu, log, turn off, remove, review after an update, accessible names | Integration-tested (offscreen) | `tst_plugin_ui` (2) |
 | SDK 0.4 and the example bot as a real program: bot marking, greeting, commands, audio, playing files | Integration-tested against a real server | `tst_examples` |
+| SDK 0.5 channels and moderation: creating a channel, moving, muting and lifting, refusals for a user without the rights | Integration-tested against a real server | `tst_sdk` |
+| Server statistics: data in and out, failed logins, connections ended by errors | Unit- and integration-tested | `tst_tls_session`, `tst_servercore` |
 | Owner recovery, audit verification and export on the command line | Integration-tested against the real program | `tst_server_process` |
 | TLS transport, hostile clients | Integration-tested | `tst_tls_session` (15) |
 | Several clients chatting; reconnection after a server restart | Integration-tested | `tst_chat_session` (9); 10 runs in a row with no failures |
@@ -99,7 +101,7 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Static analysis | clang-tidy clean on all sources ([rules](../.clang-tidy)); CodeQL security and quality queries run in CI on OpenTalk's own code, with the findings listed in the job log | CI "Static analysis" step, CodeQL workflow |
 | Fuzzing with full instrumentation | 3 minutes per fuzzer locally (28 October 2026): frames 539,000 runs, messages 4.75 million, sessions 666,000, server core 77,000, voice router 523,000, audio files 58,000. No failures in OpenTalk's code. | Nightly workflow runs 10 minutes each. Before 28 October only the harnesses were instrumented, so older fuzzing figures say less than they seemed to. The audio-file fuzzer found undefined behaviour in miniaudio's FLAC seeking and, in CI on 29 October, an out-of-bounds read there, now patched. After the patch, 15 minutes on two workers (about 124,000 runs on one) found nothing. Both are recorded in the [third-party register](licensing/third-party-register.md). |
 | Voice with real microphones and speakers on Windows | **Not yet verified** | Needs `opentalk-audio-bench device-loopback` and a listening test |
-| All tests under AddressSanitizer and UBSan | Passing (40 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
+| All tests under AddressSanitizer and UBSan | Passing (41 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
 | Portable Windows zip | Built and smoke-tested in CI | With only Windows on `PATH`, the smoke test generates a certificate, logs in, runs the Opus benchmark and sends voice through a server |
 | NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 74 steps |
 | Ctrl+C shutdown of `opentalk-server` in a Windows console | **Not yet verified manually** | Shutdown when the app closes the server's input is tested on Windows CI |
@@ -118,9 +120,9 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 ## Commands that were run (Linux sandbox, Ubuntu 24.04)
 
 ```sh
-cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 40/40 pass
+cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 41/41 pass
 run-clang-tidy -p build/linux-debug -quiet "$PWD/src/.*\.cpp$"                              # no findings
-cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 40/40 pass
+cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 41/41 pass
 cmake --preset linux-fuzz  && cmake --build --preset linux-fuzz                                 # 6 fuzzers
 docker build -t opentalk-server . && docker run ... && opentalk-ping ...                        # container works
 build/linux-fuzz/tests/fuzz/fuzz_voice_router -max_total_time=60 corpus/                        # no failures

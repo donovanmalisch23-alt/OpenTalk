@@ -126,6 +126,11 @@ struct ServerStatsInfo {
     quint32 openAppeals = 0;
     quint64 auditEntries = 0;
     bool auditIntact = true;
+    // Since 1.0 (optional on the wire; 0 from older servers).
+    quint64 bytesIn = 0;          ///< Data received since start: connections and voice over UDP.
+    quint64 bytesOut = 0;         ///< Data sent since start.
+    quint64 failedLogins = 0;     ///< Wrong or refused logins since start.
+    quint64 connectionErrors = 0; ///< Connections ended by protocol errors, time-outs or flooding.
     friend bool operator==(const ServerStatsInfo &, const ServerStatsInfo &) = default;
 };
 

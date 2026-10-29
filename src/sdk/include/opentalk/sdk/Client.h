@@ -71,6 +71,18 @@ struct User {
     QString status; ///< The user's status message, if any (since SDK 0.4).
 };
 
+/// Moderation actions (since SDK 0.5). They mean the same as in the app; see the
+/// moderation model in the documentation.
+enum class Sanction {
+    Warning,   ///< Recorded; nothing is blocked.
+    VoiceMute, ///< Cannot talk or stream audio.
+    TextMute,  ///< Cannot send messages.
+    Mute,      ///< Both.
+    Kick,      ///< Removed once; can come back.
+    Ban,       ///< Cannot log in (or, in one channel, enter it).
+    Restrict,  ///< Can only join channels.
+};
+
 /// Kinds of audio a client can send (since SDK 0.3).
 enum class AudioStream {
     Voice,       ///< Speech: what push-to-talk sends.
@@ -178,7 +190,7 @@ struct DisconnectReason {
 /// thread that created the object. Call Client::initialize() once before the first
 /// connection.
 ///
-/// Draft API (SDK 0.x): connection and login, channels, users, text and audio.
+/// Draft API (SDK 0.x): connection and login, channels, users, text, audio and moderation.
 class Client : public QObject {
     Q_OBJECT
 
@@ -213,6 +225,24 @@ public:
     /// Sets this client's status message (up to 100 characters; empty clears it). Since SDK 0.4.
     quint64 setStatus(const QString &status);
 
+    // Channels and moderation (since SDK 0.5). The server allows exactly what the account's
+    // role may do, as for a person; anything else ends in requestFinished() with an error.
+
+    /// Creates a channel inside `parentId` (0 for the top level). Temporary channels are
+    /// removed when the last person leaves. The new channel's ID arrives as requestResult().
+    quint64 createChannel(const QString &name, quint32 parentId = 0, bool persistent = false,
+                          const QString &password = {});
+    quint64 deleteChannel(quint32 channelId);
+    /// Moves someone who is online to another channel.
+    quint64 moveUser(quint32 userId, quint32 channelId);
+    /// Sanctions someone who is online. A reason is required (returns 0 without one).
+    /// `durationSeconds` 0 means until lifted (kicks ignore it); `channelId` 0 means the
+    /// whole server. The sanction's ID arrives as requestResult().
+    quint64 applySanction(quint32 userId, Sanction sanction, const QString &reason, quint32 durationSeconds = 0,
+                          quint32 channelId = 0);
+    /// Lifts a sanction, with a reason (returns 0 without one).
+    quint64 liftSanction(quint64 sanctionId, const QString &reason);
+
     /// True once audio can be sent (after each login; see audioReady()).
     bool isAudioReady() const;
     /// True while audio travels over the faster UDP path; otherwise it goes through the
@@ -234,6 +264,9 @@ signals:
     void reconnecting(int attempt, int delayMs);
     void pingReplied(qint64 milliseconds);
     void requestFinished(quint64 requestId, bool succeeded, const QString &errorMessage);
+    /// What a successful request created: a channel's or a sanction's ID. Emitted just
+    /// before requestFinished() (since SDK 0.5).
+    void requestResult(quint64 requestId, quint64 resultId);
     void channelsChanged();
     void userJoined(const opentalk::sdk::User &user);
     void userLeft(const opentalk::sdk::User &user);

@@ -163,6 +163,10 @@ private slots:
         const auto info = closedOnServer.first().at(1).value<protocol::CloseInfo>();
         QVERIFY(info.initiator == protocol::CloseInfo::Initiator::Peer);
         QTRY_COMPARE_WITH_TIMEOUT(m_server->sessionCount(), 0, kWaitMs);
+        // An orderly goodbye is not an error; the traffic is counted both ways.
+        QCOMPARE(m_server->traffic().connectionErrors, quint64{0});
+        QVERIFY(m_server->traffic().bytesIn > 0);
+        QVERIFY(m_server->traffic().bytesOut > 0);
     }
 
     void selfSignedCertificateIsNotTrustedByDefault()
@@ -328,6 +332,9 @@ private slots:
         const auto info = closedOnServer.first().at(1).value<protocol::CloseInfo>();
         QVERIFY(info.code == protocol::ErrorCode::ProtocolViolation);
         QTRY_COMPARE_WITH_TIMEOUT(disconnected.count(), 1, kWaitMs);
+        // Counted for the statistics.
+        QCOMPARE(m_server->traffic().connectionErrors, quint64{1});
+        QVERIFY(m_server->traffic().bytesIn >= 27);
     }
 
     void oversizedFrameAfterTlsClosesSession()

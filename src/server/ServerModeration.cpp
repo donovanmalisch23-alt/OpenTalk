@@ -1404,6 +1404,7 @@ void ServerCore::serverStats(Client &actor, const GetServerStats &request)
     }));
     stats.auditEntries = m_database != nullptr ? m_database->auditCount() : static_cast<quint64>(m_memoryAudit.size());
     stats.auditIntact = m_auditStatus.intact;
+    stats.failedLogins = m_failedLoginCount;
     if (m_statsProvider) {
         m_statsProvider(stats);
     }

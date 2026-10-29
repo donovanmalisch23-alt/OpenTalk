@@ -246,7 +246,11 @@ QCborMap statsToCbor(const ServerStatsInfo &x)
             {9, static_cast<qint64>(x.openReports)},
             {10, static_cast<qint64>(x.openAppeals)},
             {11, u64(x.auditEntries)},
-            {12, x.auditIntact}};
+            {12, x.auditIntact},
+            {13, u64(x.bytesIn)},
+            {14, u64(x.bytesOut)},
+            {15, u64(x.failedLogins)},
+            {16, u64(x.connectionErrors)}};
 }
 
 ServerStatsInfo readStats(FieldReader &r)
@@ -264,6 +268,10 @@ ServerStatsInfo readStats(FieldReader &r)
     x.openAppeals = r.integer<quint32>(10, "stats.appeals");
     x.auditEntries = r.integer<quint64>(11, "stats.audit");
     x.auditIntact = r.boolean(12, "stats.auditIntact", true);
+    x.bytesIn = r.optionalInteger<quint64>(13, "stats.bytesIn").value_or(0);
+    x.bytesOut = r.optionalInteger<quint64>(14, "stats.bytesOut").value_or(0);
+    x.failedLogins = r.optionalInteger<quint64>(15, "stats.failedLogins").value_or(0);
+    x.connectionErrors = r.optionalInteger<quint64>(16, "stats.connectionErrors").value_or(0);
     return x;
 }
 

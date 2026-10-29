@@ -203,8 +203,8 @@ private slots:
         QTest::newRow("change settings") << Message(ServerSettingsRequest{31, settings});
         QTest::newRow("settings result") << Message(ServerSettingsResult{31, settings});
         QTest::newRow("get stats") << Message(GetServerStats{32});
-        QTest::newRow("stats result") << Message(
-            ServerStatsResult{32, ServerStatsInfo{3600, 4, 5, 6, 700, 2100, 3, 1, 2, 1, 40, true}});
+        QTest::newRow("stats result") << Message(ServerStatsResult{
+            32, ServerStatsInfo{3600, 4, 5, 6, 700, 2100, 3, 1, 2, 1, 40, true, 1u << 20, 3u << 20, 7, 2}});
         QTest::newRow("transfer ownership") << Message(TransferOwnership{33, QStringLiteral("alice")});
     }
 

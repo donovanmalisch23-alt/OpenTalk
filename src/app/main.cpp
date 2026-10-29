@@ -15,6 +15,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QIcon>
 #include <QMessageBox>
 
 namespace {
@@ -35,6 +36,11 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("OpenTalk"));
     QApplication::setOrganizationName(QStringLiteral("OpenTalk"));
     QApplication::setApplicationVersion(QStringLiteral(OPENTALK_VERSION_STRING));
+    QIcon icon;
+    for (const int size : {16, 32, 48, 256}) {
+        icon.addFile(QStringLiteral(":/icons/opentalk-%1.png").arg(size), QSize(size, size));
+    }
+    QApplication::setWindowIcon(icon);
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("OpenTalk voice and text communication client"));

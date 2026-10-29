@@ -84,7 +84,7 @@ The person sanctioned sees a line in their history such as "Mute until 2026-11-0
 | Channel permissions | Add or delete rules (below). |
 | Audit log | Read every moderation and administration action, newest first, 100 at a time, and see whether the log is intact. |
 | Server settings | Name, welcome message, guests, most people online, highest voice quality, longest temporary ban, and a contact for banned people. Changes apply to new connections at once and are kept across restarts. |
-| Statistics | Uptime, people online, connections, channels, voice packets, sanctions, open reports and appeals, and audit log state. |
+| Statistics | Uptime, people online, connections, channels, voice packets, data received and sent, failed logins, connections ended by errors, sanctions, open reports and appeals, and audit log state. Press F5 to refresh. |
 
 Settings saved here **take precedence over** the `--name`, `--allow-guests` and `--max-users` options the server was started with.
 

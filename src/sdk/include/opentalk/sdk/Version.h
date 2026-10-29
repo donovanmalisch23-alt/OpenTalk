@@ -4,7 +4,7 @@
 /// SDK version, following Semantic Versioning (see docs/sdk/README.md). While the major
 /// version is 0 the API is a draft and may change in any release.
 #define OPENTALK_SDK_VERSION_MAJOR 0
-#define OPENTALK_SDK_VERSION_MINOR 4
+#define OPENTALK_SDK_VERSION_MINOR 5
 #define OPENTALK_SDK_VERSION_PATCH 0
 
 namespace opentalk::sdk {

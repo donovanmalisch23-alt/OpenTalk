@@ -75,7 +75,7 @@ Every request has 1: request ID. Each is answered by `RequestDone`, by `Error` w
 | Rule | 1: ID, 2: channel ID (0 = whole server), 3: for an account (bool), 4: account name, 5: role ID, 6: capability, 7: allow (bool) |
 | Audit entry | 1: number, 2: time, 3: who, 4: action (for example `sanction.ban`), 5: target, 6: channel ID, 7: reason, 8: details, 9: SHA-256 hash |
 | Settings | 1: server name, 2: welcome message, 3: guests allowed, 4: most people online, 5: highest voice bit rate (6,000–510,000), 6: longest temporary ban in days, 7: contact for banned people |
-| Statistics | 1: uptime in seconds, 2: people online, 3: connections, 4: channels, 5–7: voice packets in, out and refused, 8: active sanctions, 9: open reports, 10: appeals waiting, 11: audit entries, 12: audit chain intact |
+| Statistics | 1: uptime in seconds, 2: people online, 3: connections, 4: channels, 5–7: voice packets in, out and refused, 8: active sanctions, 9: open reports, 10: appeals waiting, 11: audit entries, 12: audit chain intact. Since 1.0, optional (absent from older servers, read as 0): 13: bytes received and 14: bytes sent since start (TLS connections before encryption, and UDP voice), 15: failed logins since start, 16: connections ended by protocol errors, time-outs or flooding |
 
 Times are milliseconds since 1970 in UTC. Text fields follow the protocol's text rules; reasons are at most 500 characters.
 

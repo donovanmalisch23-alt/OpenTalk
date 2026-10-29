@@ -73,6 +73,13 @@ add_dependencies(tst_examples opentalk_greeter_bot)
 add_test(NAME tst_examples COMMAND tst_examples)
 set_tests_properties(tst_examples PROPERTIES TIMEOUT 120)
 
+qt_add_executable(tst_sdk tst_sdk.cpp)
+target_link_libraries(tst_sdk PRIVATE
+    Qt6::Test OpenTalk::Sdk OpenTalk::Protocol OpenTalk::Server OpenTalk::Security OpenTalk::CompilerOptions)
+target_compile_definitions(tst_sdk PRIVATE OPENTALK_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+add_test(NAME tst_sdk COMMAND tst_sdk)
+set_tests_properties(tst_sdk PROPERTIES TIMEOUT 120)
+
 qt_add_executable(tst_local_server tst_local_server.cpp)
 target_link_libraries(tst_local_server PRIVATE Qt6::Test OpenTalk::Client OpenTalk::Security OpenTalk::CompilerOptions)
 target_compile_definitions(tst_local_server PRIVATE
