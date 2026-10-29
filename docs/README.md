@@ -32,10 +32,12 @@ Every document marks features with one of these states, so nothing planned is mi
 
 ## Using and extending
 
+- [Getting started: installing, connecting, remembered passwords](user-guide/getting-started.md)
 - [Voice and sounds (user guide)](user-guide/voice-and-sounds.md)
 - [Reports, sanctions and appeals (user guide)](user-guide/moderation.md)
 - [Plugins (user guide)](user-guide/plugins.md)
-- [Server quick start](server-administration/quick-start.md)
+- [Troubleshooting](user-guide/troubleshooting.md)
+- [Server quick start](server-administration/quick-start.md) and [hosting for others](server-administration/hosting.md): firewalls, systemd, Docker, certificates, backups, upgrades
 - [Moderating and administering a server](server-administration/moderation.md)
 - [Audio benchmarks](audio/benchmarks.md)
 - [SDK guide](sdk/README.md) (bots and tools)
@@ -44,4 +46,5 @@ Every document marks features with one of these states, so nothing planned is mi
 ## Development
 
 - [Building and testing](development/building.md)
+- [Signing releases: options for the owner](development/release-signing.md)
 - [Client settings reference](reference/client-settings.md)

@@ -28,8 +28,11 @@ It asks for the password twice (at least 8 characters) without showing it. A ser
 | `--recover-owner <name>` | Makes an existing account the owner, if the owner is locked out. Stop the server first. |
 | `--verify-audit` | Checks that the audit log was not changed (exit code 2 if it was). |
 | `--export-audit <file>` | Writes the audit log to a text file. |
+| `--backup <file>` | Writes a backup of the database (safe while the server runs). |
+| `--restore <file>` | Replaces the database with a backup; the server must be stopped. |
+| `--list-backups` | Lists the automatic backups. |
 
-The account commands work while the server is running; `--recover-owner` needs it stopped.
+The account commands and `--backup` work while the server is running; `--recover-owner` and `--restore` need it stopped (they refuse otherwise).
 
 ## 3. Start the server
 
@@ -51,6 +54,9 @@ The first time, it creates a self-signed **certificate** in the data folder. It 
 | `--tls-cert`, `--tls-key` | `<data>\tls\server.crt` and `.key` | Use your own certificate, for example from Let's Encrypt (give the full-chain file). |
 | `--log-level` | info | `warning`, `info` or `debug`. `debug` includes IP addresses. |
 | `--audit-retention-days` | 365 | How long the audit log keeps entries. `0` keeps them forever. |
+| `--backup-every-hours` | 24 | Automatic database backups into `<data>\backups` (`0` turns them off). See [backups](hosting.md#backups). |
+| `--keep-backups` | 7 | How many automatic backups to keep. |
+| `--backup-dir` | `<data>\backups` | Where automatic backups go. |
 
 Once someone changes the server settings from the app (Moderation → Administration → Server settings), the saved name, guest setting and user limit take precedence over `--name`, `--allow-guests` and `--max-users`.
 
@@ -74,7 +80,9 @@ Owners and administrators can change these and add their own roles and per-chann
 opentalk-ping my-server.example.org --fingerprint SHA256:AB:CD:...
 ```
 
-It logs in as a guest (or use `--user name` and type the password), and prints the server name, the number of users and channels, and the round-trip time.
+It logs in as a guest (or use `--user name` and type the password), and prints the server name, the number of users and channels, and the round-trip time. Add `--voice` to check that voice gets through on UDP too.
+
+For an always-on server (a VPS, systemd, Docker), certificates from Let's Encrypt, backups and upgrades, see [hosting for others](hosting.md).
 
 ## 6. Reaching the server from the internet
 

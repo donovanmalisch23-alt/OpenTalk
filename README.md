@@ -18,14 +18,14 @@ OpenTalk lets communities run their own voice and text chat servers, with channe
 
 ## Try the current build (Windows)
 
-1. Open the repository's **Actions** tab, select the latest successful **CI** run, and download **OpenTalk-portable-windows-x64**.
-2. Unzip it anywhere and run `OpenTalk.exe`. No installation or administrator rights are needed; settings stay in the `data` folder next to it.
+1. Download from the **Releases** page: the installer (`OpenTalk-<version>-setup-x64.exe`, for you only, no administrator rights) or the portable zip. Development builds of both are on the latest successful **CI** run in the **Actions** tab.
+2. Run the installer, or unzip the portable edition anywhere and run `OpenTalk.exe`; its settings stay in the `data` folder next to it. See [getting started](docs/user-guide/getting-started.md).
 
 To try chatting: **Server menu → Host a server on this computer**, choose a name and password for yourself (you become the server's owner), and press Enter. To join a friend's server: **Ctrl+O**.
 
 Keyboard: **F6** cycles between panes, **Ctrl+1** to **Ctrl+4** jump to channels, users, history and message input, **Enter** on a channel joins it, **Ctrl+N** creates a channel, **Ctrl+P** sends a private message, **Alt+O** opens the Moderation menu, **Ctrl+Shift+A** opens Administration, **Alt+P** opens the Plugins menu, **Ctrl+Shift+F** plays a file into your channel, **Ctrl+Shift+C** shares your computer's sound, and **F4** opens Settings. The full list is in the [accessibility plan](docs/accessibility/plan.md#keyboard-map-implemented).
 
-The zip also contains `opentalk-server.exe`, `opentalk-ping.exe`, the example bot `opentalk-greeter-bot.exe` and example plugins in `examples\plugins`. See the [server quick start](docs/server-administration/quick-start.md), the [voice and sounds guide](docs/user-guide/voice-and-sounds.md), the [plugin guide](docs/user-guide/plugins.md) and the [SDK guide](docs/sdk/README.md).
+The zip also contains `opentalk-server.exe`, `opentalk-ping.exe`, the example bot `opentalk-greeter-bot.exe` and example plugins in `examples\plugins`. See the [server quick start](docs/server-administration/quick-start.md), [hosting for others](docs/server-administration/hosting.md) (including Docker and systemd), the [voice and sounds guide](docs/user-guide/voice-and-sounds.md), the [plugin guide](docs/user-guide/plugins.md) and the [SDK guide](docs/sdk/README.md).
 
 ## Build from source
 

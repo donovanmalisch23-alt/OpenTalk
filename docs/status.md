@@ -1,6 +1,6 @@
 # Status and verification report
 
-**Last updated:** 2026-10-28. Phases 0, 2, 3, 4, 5, 6 and 7 are complete. Still open: the manual NVDA pass, the application icon, checks of Phases 4 and 7 on real sound hardware, legal review of the plugin licensing policy, and the owner's decision on a virtual audio driver.
+**Last updated:** 2026-10-29. Phases 0 and 2 to 8 are complete. Still open: the manual NVDA pass, the application icon, checks of Phases 4 and 7 on real sound hardware, legal review of the plugin licensing policy, and owner decisions on code signing and a virtual audio driver.
 
 ## What works today
 
@@ -36,6 +36,15 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 - SDK 0.4 lets bots play files; the example bot has `!play`.
 - All of it is tested with synthetic sound devices and generated signals. **None of it has been tried on real sound hardware yet.**
 
+**Hosting and packaging (Phase 8):**
+
+- A per-user Windows installer next to the portable zip. Both carry OpenSSL 3.5.9 LTS and licence notices for everything bundled.
+- "Remember my password" in Windows Credential Manager.
+- Automatic daily server backups, with `--backup`, a verified `--restore` and `--list-backups`.
+- A container image and a sandboxed systemd unit. `opentalk-ping --voice` checks reachability from outside, including UDP.
+- Guides for hosting, getting started and troubleshooting.
+- CI adds clang-tidy, CodeQL, fully instrumented fuzzing (six fuzzers, nightly runs) and a 150-client load test.
+
 | Area | State | Evidence |
 |---|---|---|
 | Build (CMake, C++20; MSVC, GCC and Clang with warnings as errors) | Built on Windows and Linux CI | Windows: MSVC 14.44, Qt 6.8.3, vcpkg OpenSSL 3.6.5 and libsodium 1.0.22. Linux: GCC 13.3 and Clang 18.1, Qt 6.4.2 |
@@ -70,8 +79,18 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Voice encryption, forwarding and fallback | Unit-tested, fuzzed and integration-tested over real sockets | `tst_packetcipher` (10), `tst_voicerouter` (10), `tst_voice_session` (5 tests: UDP, TCP fallback, a server without UDP, channel isolation, a tone travelling end to end); `fuzz_voice_router` (434,200 inputs locally, no failures) |
 | Voice in the app: push-to-talk key, audio menu, settings pages, talking indicators, per-user volume | Unit- and integration-tested (offscreen) | `tst_pushtotalk` (10), `tst_mainwindow` (11), `tst_mainwindow_online` voice test |
 | Audio performance | Measured on a VM without sound hardware | [Benchmarks](audio/benchmarks.md) |
+| Remembered passwords: only after a successful login, filled in next time, forgotten when unticked or the server is deleted | Integration-tested (offscreen, real server); the real Credential Manager is tested on Windows CI | `tst_remember_password` (5), `tst_credentialstore` |
+| Server backups: VACUUM INTO while running, integrity and version checks, schedule and retention, restore with a safety copy, refusal while a server runs, one server per data folder | Unit- and integration-tested against the real program | `tst_serverdatabase`, `tst_servercore` (`automaticBackupsFollowTheSchedule`), `tst_server_process` |
+| Reachability check (`opentalk-ping --voice`) with and without UDP | Integration-tested against the real programs | `tst_server_process` (`pingChecksTheVoicePath`) |
+| Per-address connection cap; 150 clients connecting, chatting and leaving at once | Integration-tested | `tst_tls_session`: 150 clients connected in about 1.5 s; a message reached all of them in about 50 ms |
+| Windows installer: silent install, files, no portable marker, uninstall entry, uninstall that leaves other files | Tested in Windows CI | "Build and test the installer" step |
+| Licence notices: every DLL in the package is covered, licence files present | Checked in Windows CI | Packaging step fails on an unlisted DLL; `THIRD-PARTY-NOTICES.txt`, `licenses/` |
+| Packaged OpenSSL is from the 3.5 LTS series | Checked in Windows CI | Smoke test reads the server's "TLS library" line |
+| Server container image: start, connect, automatic backup, graceful stop | Tested in CI and in the sandbox | "Server container image" job |
+| Static analysis | clang-tidy clean on all sources ([rules](../.clang-tidy)); CodeQL security queries run in CI | CI "Static analysis" step, CodeQL workflow |
+| Fuzzing with full instrumentation | 3 minutes per fuzzer locally (28 October 2026): frames 539,000 runs, messages 4.75 million, sessions 666,000, server core 77,000, voice router 523,000, audio files 58,000. No failures in OpenTalk's code. | Nightly workflow runs 10 minutes each. Before 28 October only the harnesses were instrumented, so older fuzzing figures say less than they seemed to. The audio-file fuzzer found undefined behaviour in miniaudio's FLAC seeking (recorded in the [third-party register](licensing/third-party-register.md)). |
 | Voice with real microphones and speakers on Windows | **Not yet verified** | Needs `opentalk-audio-bench device-loopback` and a listening test |
-| All tests under AddressSanitizer and UBSan | Passing (37 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
+| All tests under AddressSanitizer and UBSan | Passing (39 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
 | Portable Windows zip | Built and smoke-tested in CI | With only Windows on `PATH`, the smoke test generates a certificate, logs in, runs the Opus benchmark and sends voice through a server |
 | NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 74 steps |
 | Ctrl+C shutdown of `opentalk-server` in a Windows console | **Not yet verified manually** | Shutdown when the app closes the server's input is tested on Windows CI |
@@ -83,16 +102,18 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 - Plugins are not sandboxed by the operating system (they run with the user's rights), and cannot play audio; bots built with the SDK can.
 - Only WAV, FLAC and MP3 files can be played into a channel. On Windows 10, shared computer audio may still carry some of other people's voices; routing OpenTalk to another device avoids it. Echo cancellation cannot remove a screen reader's speech.
 - Voice has not been tried on real sound hardware. Push-to-talk works globally only on Windows; elsewhere it works while OpenTalk's window is in front.
-- Passwords are not remembered; the app asks on each connect.
-- The packaged OpenSSL (3.6.5) series ends support around November 2026. A supported LTS is required before a public release ([ADR 0007](architecture/decisions/0007-openssl-tls-backend.md)).
+- Remembered passwords exist only on Windows (Credential Manager); elsewhere the app asks on each connect.
+- Releases are not code-signed yet, so Windows SmartScreen warns about them ([options](development/release-signing.md)).
 - The Windows server's private key relies on the user's data folder permissions; no extra access-control list is set yet.
 
 ## Commands that were run (Linux sandbox, Ubuntu 24.04)
 
 ```sh
-cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 37/37 pass
-cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 37/37 pass
-cmake --preset linux-fuzz  && cmake --build --preset linux-fuzz                                 # 5 fuzzers
+cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 39/39 pass
+run-clang-tidy -p build/linux-debug -quiet "$PWD/src/.*\.cpp$"                              # no findings
+cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 39/39 pass
+cmake --preset linux-fuzz  && cmake --build --preset linux-fuzz                                 # 6 fuzzers
+docker build -t opentalk-server . && docker run ... && opentalk-ping ...                        # container works
 build/linux-fuzz/tests/fuzz/fuzz_voice_router -max_total_time=60 corpus/                        # no failures
 build/linux-release/tools/audio-bench/opentalk-audio-bench all                                  # docs/audio/benchmarks.md
 for i in $(seq 10); do build/linux-debug/tests/integration/tst_chat_session; done               # 0 failures
@@ -115,3 +136,5 @@ Windows results come from the CI runs linked on the pull request.
 5. Have the [plugin licensing policy](plugins/licensing.md) reviewed by a lawyer before the first public release. It decides whether third-party plugins may use any licence.
 6. Decide on a virtual audio driver using the [feasibility report](audio/virtual-driver-feasibility.md). The recommendation is not to build one now; you approved "no virtual audio driver for now" on 2026-10-26, and the report confirms the costs.
 7. Try steps 65–74 of the NVDA script (files and computer audio), on Windows 11 and, if possible, Windows 10.
+8. Decide on code signing ([options and costs](development/release-signing.md)). Until then releases are unsigned, with SHA-256 sums and GitHub build provenance.
+9. Optionally report the miniaudio FLAC finding upstream (details in the third-party register).

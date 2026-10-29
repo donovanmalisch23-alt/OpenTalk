@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# GitHub CodeQL security analysis of the C++ code. Results appear under the repository's
+# Security tab, Code scanning.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev libspeexdsp-dev pkg-config ninja-build
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-and-quality
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DOPENTALK_BUILD_TESTS=OFF
+          cmake --build build
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:c-cpp"

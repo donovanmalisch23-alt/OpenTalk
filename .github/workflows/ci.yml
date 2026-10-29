@@ -214,7 +214,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev libspeexdsp-dev pkg-config ninja-build clang-format
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev libspeexdsp-dev pkg-config ninja-build clang-format clang-tidy
 
       - name: Check formatting
         run: find src tests -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror
@@ -225,6 +225,9 @@ jobs:
           cmake --build --preset linux-debug
           ctest --preset linux-debug
 
+      - name: Static analysis (clang-tidy, rules in .clang-tidy)
+        run: run-clang-tidy -p build/linux-debug -quiet "$PWD/src/.*\.cpp$"
+
       - name: Build and test with AddressSanitizer and UBSan
         run: |
           cmake --preset linux-asan
@@ -232,7 +235,7 @@ jobs:
           ctest --preset linux-asan
 
   fuzz:
-    name: Fuzz protocol parsers (smoke run)
+    name: Fuzz parsers (smoke run)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -249,7 +252,7 @@ jobs:
 
       - name: Run each fuzzer for 1 minute
         run: |
-          for target in frame_decoder message_decoder session server_core voice_router; do
+          for target in frame_decoder message_decoder session server_core voice_router media_decoder; do
             mkdir -p "corpus/$target"
             if [ -d "tests/fuzz/seeds/$target" ]; then cp tests/fuzz/seeds/$target/* "corpus/$target/"; fi
             echo "::group::fuzz_$target"

@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Longer fuzzing than the CI smoke run: every night, each fuzzer runs for 10 minutes,
+# starting from the corpus the previous nights built up. Crashes are kept as artifacts.
+name: Nightly fuzzing
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [frame_decoder, message_decoder, session, server_core, voice_router, media_decoder]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev libspeexdsp-dev pkg-config ninja-build clang libclang-rt-18-dev
+
+      - name: Restore the corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Build
+        run: |
+          cmake --preset linux-fuzz
+          cmake --build --preset linux-fuzz --target fuzz_${{ matrix.target }}
+
+      - name: Fuzz for 10 minutes
+        run: |
+          mkdir -p corpus artifacts
+          if [ -d "tests/fuzz/seeds/${{ matrix.target }}" ]; then cp -n tests/fuzz/seeds/${{ matrix.target }}/* corpus/; fi
+          build/linux-fuzz/tests/fuzz/fuzz_${{ matrix.target }} -max_total_time=600 -print_final_stats=1 \
+            -artifact_prefix=artifacts/ corpus
+
+      - name: Save the corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: Keep crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: artifacts

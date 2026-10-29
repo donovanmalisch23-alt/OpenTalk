@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include <QByteArray>
 #include <QString>
 #include <QtGlobal>
 
@@ -23,6 +24,8 @@ public:
     static QString fileFilter();
 
     bool open(const QString &path, QString *errorMessage);
+    /// Reads from memory instead of a file (`data` is copied), for tests and fuzzing.
+    bool openData(const QByteArray &data, const QString &title, QString *errorMessage);
     void close();
     bool isOpen() const;
 

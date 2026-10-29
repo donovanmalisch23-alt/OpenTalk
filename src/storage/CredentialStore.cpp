@@ -2,8 +2,10 @@
 #include "opentalk/storage/CredentialStore.h"
 
 #ifdef Q_OS_WIN
-#include <wincred.h>
+// <windows.h> must come before <wincred.h>; the blank line keeps clang-format from sorting them.
 #include <windows.h>
+
+#include <wincred.h>
 #endif
 
 #include <string>

@@ -368,7 +368,8 @@ quint64 Connection::sendRequest(protocol::Message request)
     const quint64 id = nextRequestId();
     const bool isRequest = std::visit(
         [id](auto &m) {
-            if constexpr (requires { m.requestId = quint64{0}; }) {
+            // A requires-expression, not an assignment.
+            if constexpr (requires { m.requestId = quint64{0}; }) { // NOLINT(bugprone-assignment-in-if-condition)
                 m.requestId = id;
                 return true;
             } else {

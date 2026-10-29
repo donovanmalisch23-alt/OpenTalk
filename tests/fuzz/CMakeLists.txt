@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# libFuzzer harnesses for code that parses untrusted network input.
+# libFuzzer harnesses for code that parses untrusted input: network messages, and audio
+# files. Every first-party library is built with coverage instrumentation in this
+# configuration (see cmake/OpenTalkCompilerOptions.cmake).
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "OPENTALK_BUILD_FUZZERS requires Clang (libFuzzer)")
 endif()
@@ -18,3 +20,5 @@ opentalk_add_fuzzer(fuzz_server_core)
 target_link_libraries(fuzz_server_core PRIVATE OpenTalk::Server)
 opentalk_add_fuzzer(fuzz_voice_router)
 target_link_libraries(fuzz_voice_router PRIVATE OpenTalk::Server)
+opentalk_add_fuzzer(fuzz_media_decoder)
+target_link_libraries(fuzz_media_decoder PRIVATE OpenTalk::Audio)

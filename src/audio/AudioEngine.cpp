@@ -412,7 +412,7 @@ private:
         const bool deafened = m_engine.m_deafened.load();
         QByteArray payload;
         QByteArray fec;
-        while (m_playback.available() < static_cast<std::size_t>(kPlaybackTargetFrames * kFrameSamples)) {
+        while (m_playback.available() < static_cast<std::size_t>(kPlaybackTargetFrames) * kFrameSamples) {
             std::fill(m_mix.begin(), m_mix.end(), 0.0f);
             for (auto it = m_streams.begin(); it != m_streams.end();) {
                 Stream &stream = it->second;

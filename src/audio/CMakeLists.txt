@@ -11,6 +11,10 @@ endif()
 if(WIN32)
     target_link_libraries(opentalk_miniaudio PUBLIC ole32)
 endif()
+if(OPENTALK_BUILD_FUZZERS)
+    # The media-file fuzzer explores miniaudio's WAV, FLAC and MP3 decoders.
+    target_compile_options(opentalk_miniaudio PRIVATE -fsanitize=fuzzer-no-link,address,undefined)
+endif()
 
 add_library(opentalk_audio STATIC
     include/opentalk/audio/AudioBackend.h

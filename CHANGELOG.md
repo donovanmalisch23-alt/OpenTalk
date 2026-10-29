@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ### Added
 
+- Windows installer (per user, no administrator rights), next to the portable zip. Uninstalling keeps your settings.
+- "Remember my password" in the connect dialog, kept in Windows Credential Manager only, and only after the server accepted it.
+- Help, Third-party notices; the package now contains THIRD-PARTY-NOTICES.txt and every bundled licence. About shows the Qt and OpenSSL versions.
+- Server: automatic daily database backups (`--backup-every-hours`, `--keep-backups`, `--backup-dir`), `--backup`, `--restore` and `--list-backups`; a second server can no longer use the same data folder.
+- `opentalk-ping --voice` checks that voice gets through on UDP (exit code 3 when only the fallback works).
+- SDK: `Client::isAudioUsingUdp()` and `audioPathChanged()`.
+- A container image (`Dockerfile`), a systemd unit, and guides for hosting, getting started and troubleshooting.
+- CI: clang-tidy, CodeQL, nightly fuzzing, an audio-file fuzzer, and a 150-client load test.
 - Voice processing (Phase 7): noise suppression (on by default), automatic gain and echo cancellation for speakers, using speexdsp 1.2.1 (added to the third-party register).
 - Voice effects: rumble filter, bass, treble and a voice changer (pitch), on a new "Voice Effects and Media" settings page.
 - Playing WAV, FLAC and MP3 files into your channel (Ctrl+Shift+F), with pause (Ctrl+Shift+K), back and forward 10 seconds (Ctrl+Shift+J, Ctrl+Shift+L), stop (Ctrl+Shift+X) and "what is playing" (Ctrl+Shift+I). The sender hears it too unless they turn that off.
@@ -34,7 +42,14 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - `opentalk-audio-bench`: codec, jitter, server and network measurements, plus a sound-hardware round-trip test. Results are in docs/audio/benchmarks.md.
 - miniaudio 0.11.25 (vendored) and Opus added to the third-party register.
 
+### Changed
+
+- Windows packages use OpenSSL 3.5.9 (long-term support until 2030) instead of 3.6.
+
 ### Fixed
+
+- The fuzz build now instruments the libraries under test, not only the fuzz harnesses.
+- Restoring a backup twice in the same second could overwrite the file being restored.
 
 - A kicked or banned client no longer reconnects by itself, and now shows the server's reason. An error without a request ID now ends the session (documented in the protocol).
 - TCP connections now send small messages immediately (`TCP_NODELAY`); before, a message could wait about 40 ms.

@@ -17,6 +17,14 @@ else()
     if(OPENTALK_WARNINGS_AS_ERRORS)
         target_compile_options(opentalk_compiler_options INTERFACE -Werror)
     endif()
+    if(OPENTALK_BUILD_FUZZERS)
+        # Instrument every first-party library, not only the fuzz harnesses: libFuzzer
+        # needs coverage from the parsers themselves to explore them, and AddressSanitizer
+        # must check their memory accesses. Harnesses add -fsanitize=fuzzer when linking.
+        target_compile_options(opentalk_compiler_options INTERFACE
+            -fsanitize=fuzzer-no-link,address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+        target_link_options(opentalk_compiler_options INTERFACE -fsanitize=address,undefined)
+    endif()
     if(OPENTALK_ENABLE_SANITIZERS)
         target_compile_options(opentalk_compiler_options INTERFACE
             -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all)

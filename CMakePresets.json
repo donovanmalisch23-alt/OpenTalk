@@ -72,6 +72,7 @@
       "displayName": "Linux libFuzzer targets (Clang)",
       "inherits": "linux-debug",
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "OPENTALK_BUILD_TESTS": "OFF",
         "OPENTALK_BUILD_FUZZERS": "ON"

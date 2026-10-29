@@ -8,10 +8,14 @@
 #include "opentalk/security/Tls.h"
 #include "opentalk/server/Server.h"
 
+#include <QElapsedTimer>
 #include <QSignalSpy>
 #include <QSslSocket>
 #include <QTcpSocket>
 #include <QTest>
+
+#include <memory>
+#include <vector>
 
 using namespace opentalk;
 
@@ -217,6 +221,74 @@ private slots:
         QVERIFY(secondDisconnected.wait(kWaitMs));
         QVERIFY(disconnectInfo(secondDisconnected).protocolCode == protocol::ErrorCode::ServerFull);
         QVERIFY(first.state() == client::ConnectionState::Connected);
+    }
+
+    void connectionsPerAddressAreCapped()
+    {
+        startServer([](server::ServerConfig &c) { c.maxConnectionsPerAddress = 3; });
+        std::vector<std::unique_ptr<QSslSocket>> open;
+        for (int i = 0; i < 3; ++i) {
+            auto socket = rawTlsSocket();
+            QVERIFY(socket);
+            open.push_back(std::move(socket));
+        }
+        // A fourth from the same address is dropped before it gets anywhere.
+        QSslSocket fourth;
+        QSslConfiguration config = security::clientTlsConfiguration();
+        config.setPeerVerifyMode(QSslSocket::VerifyNone);
+        fourth.setSslConfiguration(config);
+        QSignalSpy dropped(&fourth, &QSslSocket::disconnected);
+        QSignalSpy encrypted(&fourth, &QSslSocket::encrypted);
+        fourth.connectToHostEncrypted(QStringLiteral("127.0.0.1"), m_server->serverPort());
+        QTRY_VERIFY_WITH_TIMEOUT(!dropped.isEmpty() || fourth.state() == QAbstractSocket::UnconnectedState, kWaitMs);
+        QVERIFY(encrypted.isEmpty());
+        for (const auto &socket : open) {
+            QCOMPARE(socket->state(), QAbstractSocket::ConnectedState); // the first three are unaffected
+        }
+        // Once one closes, there is room again.
+        QSignalSpy closed(open.front().get(), &QSslSocket::disconnected);
+        open.front()->disconnectFromHost();
+        QTRY_VERIFY_WITH_TIMEOUT(!closed.isEmpty(), kWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(m_server->sessionCount(), 2, kWaitMs);
+        QVERIFY(rawTlsSocket() != nullptr);
+    }
+
+    void manyClientsAtOnce()
+    {
+        // A busy evening: 150 people connect at the same time, chat and leave.
+        constexpr int kClients = 150;
+        startServer([](server::ServerConfig &c) {
+            c.maxSessions = 300;
+            c.maxConnectionsPerAddress = 300; // all of them come from 127.0.0.1 here
+        });
+        QElapsedTimer timer;
+        timer.start();
+        std::vector<std::unique_ptr<client::Connection>> clients;
+        int connected = 0;
+        int received = 0;
+        for (int i = 0; i < kClients; ++i) {
+            auto c = std::make_unique<client::Connection>();
+            QObject::connect(c.get(), &client::Connection::connected, c.get(), [&connected] { ++connected; });
+            QObject::connect(c.get(), &client::Connection::textReceived, c.get(),
+                             [&received](const protocol::TextMessage &) { ++received; });
+            c->connectToServer(options(pinnedTrust()));
+            clients.push_back(std::move(c));
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(connected, kClients, 60'000);
+        QCOMPARE(m_server->onlineUserCount(), kClients);
+        const qint64 connectMs = timer.restart();
+
+        clients.front()->sendText(protocol::TextTarget::Channel, protocol::kRootChannelId, QStringLiteral("hello all"));
+        QTRY_COMPARE_WITH_TIMEOUT(received, kClients, 30'000); // everyone, the sender included
+        const qint64 broadcastMs = timer.restart();
+
+        for (const auto &c : clients) {
+            c->disconnectFromServer();
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(m_server->sessionCount(), 0, 30'000);
+        QCOMPARE(m_server->onlineUserCount(), 0);
+        qInfo("%d clients: all connected in %lld ms, a message reached everyone in %lld ms, all gone in %lld ms",
+              kClients, connectMs, broadcastMs, timer.elapsed());
     }
 
     void incompatibleVersionIsReported()

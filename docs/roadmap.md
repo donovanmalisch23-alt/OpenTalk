@@ -126,6 +126,20 @@ Effects pipeline; media player plugin; per-process WASAPI loopback that excludes
 
 Public-hosting guide, reachability self-test, certificate setup, **packaged OpenSSL on a supported LTS series, with licence notices for all bundled libraries**, remembered passwords in Windows Credential Manager, installer (and portable build), backups and restore, static analysis and dependency scanning in CI, longer fuzzing, resource-exhaustion tests, a release signing decision.
 
+**Done:**
+
+- **Hosting:** the [hosting guide](server-administration/hosting.md) covers firewalls, systemd, Docker, certificates (self-signed or Let's Encrypt), backups and upgrades. `opentalk-ping --voice` is the reachability check, including UDP.
+- **Packages:** the Windows package carries OpenSSL 3.5.9 LTS from an overlay port, and licence notices for everything bundled, including the code inside Qt. CI fails on an unlisted DLL.
+- **Remembered passwords** in Windows Credential Manager.
+- **Installer:** a per-user NSIS installer next to the portable build, installed and uninstalled in CI.
+- **Server backups:** automatic daily backups, `--backup` and a verified `--restore`, and a lock so two servers never share a data folder.
+- **Server packaging:** a server-only build, a container image tested in CI, and a sandboxed systemd unit.
+- **Static analysis:** clang-tidy (clean) and CodeQL in CI.
+- **Fuzzing:** fully instrumented now (before, only the harnesses were), with a new audio-file fuzzer and 10 minutes per fuzzer every night.
+- **Resource tests:** the per-address connection cap, and 150 simultaneous clients.
+
+**Not done (owner decisions):** code signing ([options](development/release-signing.md)). Automated vulnerability alerts for C++ dependencies are not available from GitHub for vcpkg and system packages; the monthly review covers them.
+
 ## Phase 9: Release candidate
 
 Full regression; NVDA validation; upgrade testing; user, admin and plugin guides; third-party notices; release notes; the published acceptance checklist.

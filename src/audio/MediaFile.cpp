@@ -19,6 +19,7 @@ namespace opentalk::audio {
 struct MediaFile::Impl {
     ma_decoder decoder{};
     bool open = false;
+    QByteArray data; ///< For openData(); must outlive the decoder.
 };
 
 MediaFile::MediaFile()
@@ -71,12 +72,37 @@ bool MediaFile::open(const QString &path, QString *errorMessage)
     return true;
 }
 
+bool MediaFile::openData(const QByteArray &data, const QString &title, QString *errorMessage)
+{
+    close();
+    d->data = data;
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 1, kSampleRate);
+    if (ma_decoder_init_memory(d->data.constData(), static_cast<size_t>(d->data.size()), &config, &d->decoder) !=
+        MA_SUCCESS) {
+        d->data.clear();
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("it is not a WAV, FLAC or MP3 file OpenTalk can read");
+        }
+        return false;
+    }
+    d->open = true;
+    m_path.clear();
+    m_title = title;
+    m_positionSamples = 0;
+    ma_uint64 frames = 0;
+    m_durationMs = ma_decoder_get_length_in_pcm_frames(&d->decoder, &frames) == MA_SUCCESS && frames > 0
+                       ? static_cast<qint64>(frames * 1000 / kSampleRate)
+                       : -1;
+    return true;
+}
+
 void MediaFile::close()
 {
     if (d->open) {
         ma_decoder_uninit(&d->decoder);
         d->open = false;
     }
+    d->data.clear();
     m_durationMs = -1;
     m_positionSamples = 0;
 }

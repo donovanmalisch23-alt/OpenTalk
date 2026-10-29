@@ -99,6 +99,36 @@ private slots:
         QCOMPARE(file.positionMs(), 3000);
     }
 
+    void readsFlacAndMp3()
+    {
+        // 0.1 s of a 440 Hz tone at 8 or 16 kHz, made with ffmpeg (tests/fuzz/seeds/media_decoder).
+        for (const QString &name : {QStringLiteral("short.flac"), QStringLiteral("short.mp3")}) {
+            const QString path = QStringLiteral(OPENTALK_MEDIA_SAMPLES "/") + name;
+            MediaFile file;
+            QString error;
+            QVERIFY2(file.open(path, &error), qPrintable(name + QStringLiteral(": ") + error));
+            std::vector<float> all;
+            std::vector<float> frame(kFrameSamples);
+            for (std::size_t got = frame.size(); got == frame.size();) {
+                got = file.read(frame);
+                all.insert(all.end(), frame.begin(), frame.begin() + static_cast<std::ptrdiff_t>(got));
+            }
+            // About 0.1 s (MP3 adds a little padding), resampled to 48 kHz.
+            QVERIFY2(all.size() >= 4000 && all.size() <= 9000, qPrintable(name + QString::number(all.size())));
+            QVERIFY2(toneStrength(all.data(), static_cast<qsizetype>(all.size()), 440.0) > 0.05, qPrintable(name));
+
+            // The same from memory.
+            QFile bytes(path);
+            QVERIFY(bytes.open(QIODevice::ReadOnly));
+            MediaFile memory;
+            QVERIFY(memory.openData(bytes.readAll(), name, &error));
+            QCOMPARE(memory.title(), name);
+            QVERIFY(memory.read(frame) > 0);
+        }
+        MediaFile garbage;
+        QVERIFY(!garbage.openData(QByteArray(1000, 'x'), QStringLiteral("x"), nullptr));
+    }
+
     void refusesWhatItCannotRead()
     {
         QTemporaryDir dir;

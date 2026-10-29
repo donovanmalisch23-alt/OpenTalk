@@ -26,6 +26,8 @@ target_link_libraries(tst_audio_core PRIVATE OpenTalk::Opus)
 opentalk_add_test(tst_voice_processing LIBS OpenTalk::Audio)
 opentalk_add_test(tst_voice_effects LIBS OpenTalk::Audio)
 opentalk_add_test(tst_media_file LIBS OpenTalk::Audio)
+target_compile_definitions(tst_media_file PRIVATE
+    OPENTALK_MEDIA_SAMPLES="${PROJECT_SOURCE_DIR}/tests/fuzz/seeds/media_decoder")
 opentalk_add_test(tst_audio_engine LIBS OpenTalk::Audio)
 set_tests_properties(tst_audio_engine PROPERTIES TIMEOUT 120)
 opentalk_add_test(tst_passwordhash LIBS OpenTalk::Security)
