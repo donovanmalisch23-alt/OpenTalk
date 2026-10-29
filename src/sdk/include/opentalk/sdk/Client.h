@@ -228,8 +228,9 @@ public:
     // Channels and moderation (since SDK 0.5). The server allows exactly what the account's
     // role may do, as for a person; anything else ends in requestFinished() with an error.
 
-    /// Creates a channel inside `parentId` (0 for the top level). Temporary channels are
-    /// removed when the last person leaves. The new channel's ID arrives as requestResult().
+    /// Creates a channel inside `parentId` (0 for the top level). The new channel's ID
+    /// arrives as requestResult(). You are moved into a temporary channel you create; it is
+    /// removed when the last person leaves it.
     quint64 createChannel(const QString &name, quint32 parentId = 0, bool persistent = false,
                           const QString &password = {});
     quint64 deleteChannel(quint32 channelId);

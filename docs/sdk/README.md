@@ -88,7 +88,7 @@ QObject::connect(&client, &opentalk::sdk::Client::requestResult, [&](quint64 req
 
 - `applySanction()` and `liftSanction()` need a reason and return 0 without one. Everyone sanctioned is told the reason, and the audit log records the bot's account as the moderator.
 - `durationSeconds` 0 means until lifted; `channelId` 0 means the whole server.
-- `deleteChannel()` needs an administrator. Temporary channels are removed by the server when the last person leaves.
+- `deleteChannel()` needs an administrator. Whoever creates a temporary channel is moved into it, and the server removes it when the last person leaves.
 
 ## Bots
 

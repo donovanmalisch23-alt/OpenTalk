@@ -10,6 +10,7 @@
 #include "opentalk/server/Server.h"
 #include "opentalk/server/ServerDatabase.h"
 
+#include <QElapsedTimer>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -137,19 +138,27 @@ private slots:
 
     void aModeratorBotCanManageChannelsAndPeople()
     {
+        // Elapsed times in the log show where the time went if this ever fails on a slow machine.
+        QElapsedTimer elapsed;
+        elapsed.start();
+        const auto step = [&elapsed](const char *what) { qInfo("%s after %lld ms", what, elapsed.elapsed()); };
         auto bot = connect(QStringLiteral("modbot"));
         auto alice = connect(QStringLiteral("alice"));
         QVERIFY(bot && alice);
         QTRY_VERIFY_WITH_TIMEOUT(find(*bot, QStringLiteral("alice")).has_value(), kWaitMs);
         const quint32 aliceId = find(*bot, QStringLiteral("alice"))->id;
+        step("both logged in");
 
         // A channel, then alice moved into it.
         quint64 channelId = 0;
         QCOMPARE(waitFor(*bot, bot->createChannel(QStringLiteral("Quiet room")), nullptr, &channelId), true);
         QVERIFY(channelId != 0);
+        // Whoever creates a temporary channel is moved into it.
+        QTRY_COMPARE_WITH_TIMEOUT(bot->self().channelId, static_cast<quint32>(channelId), kWaitMs);
         QTRY_VERIFY_WITH_TIMEOUT(find(*bot, QStringLiteral("alice")).has_value(), kWaitMs);
         QCOMPARE(waitFor(*bot, bot->moveUser(aliceId, static_cast<quint32>(channelId))), true);
         QTRY_COMPARE_WITH_TIMEOUT(alice->self().channelId, static_cast<quint32>(channelId), kWaitMs);
+        step("channel created and alice moved");
 
         // Muted for a minute, which everyone sees, then lifted.
         QCOMPARE(bot->applySanction(aliceId, sdk::Sanction::Mute, QStringLiteral("  ")), quint64{0}); // no reason
@@ -163,6 +172,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(alice->self().voiceMuted, kWaitMs);
         QCOMPARE(waitFor(*bot, bot->liftSanction(sanctionId, QStringLiteral("done"))), true);
         QTRY_VERIFY_WITH_TIMEOUT(!find(*bot, QStringLiteral("alice"))->voiceMuted, kWaitMs);
+        step("muted and unmuted");
 
         // A registered user may do none of this.
         QString error;
@@ -174,11 +184,16 @@ private slots:
 
         QCOMPARE(waitFor(*alice, alice->deleteChannel(static_cast<quint32>(channelId))), false);
 
-        // The temporary channel goes away when alice, the last one in it, leaves.
+        // The temporary channel goes away when the last people in it, alice and the bot, leave.
+        const auto channelExists = [&bot, channelId] {
+            const QList<sdk::Channel> channels = bot->channels();
+            return std::any_of(channels.cbegin(), channels.cend(),
+                               [channelId](const sdk::Channel &c) { return c.id == channelId; });
+        };
         QCOMPARE(waitFor(*alice, alice->joinChannel(protocol::kRootChannelId)), true);
-        QTRY_VERIFY_WITH_TIMEOUT(std::none_of(bot->channels().cbegin(), bot->channels().cend(),
-                                              [channelId](const sdk::Channel &c) { return c.id == channelId; }),
-                                 kWaitMs);
+        QVERIFY(channelExists()); // the bot is still in it
+        QCOMPARE(waitFor(*bot, bot->joinChannel(protocol::kRootChannelId)), true);
+        QTRY_VERIFY_WITH_TIMEOUT(!channelExists(), kWaitMs);
     }
 };
 
