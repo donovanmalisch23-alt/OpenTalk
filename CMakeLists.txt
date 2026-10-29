@@ -2,10 +2,19 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(OpenTalk
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "Open-source, self-hosted, accessible voice and text communication"
     HOMEPAGE_URL "https://github.com/donovanmalisch23-alt/OpenTalk"
     LANGUAGES C CXX)
+
+# Pre-release label shown after the version, as in "1.0.0-rc.1"; empty for a final release.
+# The release workflow checks that a release tag (v1.0.0-rc.1) matches it.
+set(OPENTALK_VERSION_LABEL "rc.1")
+if(OPENTALK_VERSION_LABEL)
+    set(OPENTALK_DISPLAY_VERSION "${PROJECT_VERSION}-${OPENTALK_VERSION_LABEL}")
+else()
+    set(OPENTALK_DISPLAY_VERSION "${PROJECT_VERSION}")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

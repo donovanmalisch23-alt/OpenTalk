@@ -497,6 +497,37 @@ private slots:
         QCOMPARE(ui::ChannelTree::userLabel(QStringLiteral("x"), false, QString(),
                                             protocol::TextMutedFlag | protocol::RestrictedFlag),
                  QStringLiteral("x, text muted, restricted"));
+        QCOMPARE(ui::ChannelTree::userLabel(QStringLiteral("al"), false, QString(), 0, QStringLiteral("back at 5")),
+                 QStringLiteral("al, status: back at 5"));
+    }
+
+    void statusMessagesAreShownToOthers()
+    {
+        auto boss = login(QStringLiteral("boss"));
+        auto alice = login(QStringLiteral("alice"));
+        QVERIFY(boss && alice);
+        QAction *status = alice->action("statusAction");
+        QVERIFY(status && status->isEnabled());
+        whenDialogOpens<QInputDialog>([](QInputDialog *dialog) {
+            dialog->setTextValue(QStringLiteral("back at 5"));
+            dialog->accept();
+        });
+        status->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(
+            treeTexts(boss->window->channelTree()).contains(QStringLiteral("alice, status: back at 5")), kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(boss->history().contains(QStringLiteral("alice's status: back at 5")), kWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(alice->window->statusText() == QStringLiteral("Your status is now: back at 5"),
+                                 kWaitMs);
+        // Cleared again.
+        whenDialogOpens<QInputDialog>([](QInputDialog *dialog) {
+            QCOMPARE(dialog->textValue(), QStringLiteral("back at 5")); // the dialog starts with the current one
+            dialog->setTextValue(QString());
+            dialog->accept();
+        });
+        status->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(boss->history().contains(QStringLiteral("alice cleared their status.")), kWaitMs);
+        // The channel list refreshes shortly after a change, not at once.
+        QTRY_VERIFY_WITH_TIMEOUT(treeTexts(boss->window->channelTree()).contains(QStringLiteral("alice")), kWaitMs);
     }
 
     void dialogsAreAccessible()

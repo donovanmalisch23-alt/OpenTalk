@@ -1,6 +1,6 @@
 # Status and verification report
 
-**Last updated:** 2026-10-29. Phases 0 and 2 to 8 are complete. Still open: the manual NVDA pass, the application icon, checks of Phases 4 and 7 on real sound hardware, legal review of the plugin licensing policy, and owner decisions on code signing and a virtual audio driver.
+**Last updated:** 2026-10-29. Phases 0 and 2 to 9 are complete, and version **1.0.0-rc.1** (a release candidate) is published by the release workflow. Every requirement and its evidence is in the [acceptance checklist](release-notes/1.0.0-rc.1-acceptance.md). Still open before 1.0.0: the manual NVDA pass, checks of voice, files and computer audio on real sound hardware, legal review of the plugin licensing policy, and owner decisions on code signing and a virtual audio driver.
 
 ## What works today
 
@@ -45,10 +45,19 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 - Guides for hosting, getting started and troubleshooting.
 - CI adds clang-tidy, CodeQL, fully instrumented fuzzing (six fuzzers, nightly runs) and a 150-client load test.
 
+**Release (Phase 9):**
+
+- Status messages shown after people's names, a support file the user reads before sharing, settings export and import, one copy per data folder, and a note after an unexpected exit.
+- A release workflow that publishes the tested portable zip and installer with checksums and build provenance when a version tag is pushed ([how](development/releasing.md)).
+- Fuzzing in CI found an out-of-bounds read in miniaudio's FLAC seeking. It is patched in the vendored copy, with a regression test, and recorded in the [third-party register](licensing/third-party-register.md).
+
 | Area | State | Evidence |
 |---|---|---|
 | Build (CMake, C++20; MSVC, GCC and Clang with warnings as errors) | Built on Windows and Linux CI | Windows: MSVC 14.44, Qt 6.8.3, vcpkg OpenSSL 3.6.5 and libsodium 1.0.22. Linux: GCC 13.3 and Clang 18.1, Qt 6.4.2 |
-| Settings, data folders, saved servers | Unit-tested | `tst_settingsstore`, `tst_apppaths`, `tst_serverprofiles` |
+| Settings, data folders, saved servers; settings export and import | Unit-tested | `tst_settingsstore` (18), `tst_apppaths`, `tst_serverprofiles`; `tst_mainwindow` (export and import from the File menu, with a copy kept) |
+| One copy per data folder; noticing an unexpected exit | Unit-tested with a real second process that crashes | `tst_datafolderlock` |
+| Support file: contents, nothing private, home folder hidden, saved as shown, accessible names | Unit-tested (offscreen) | `tst_mainwindow` |
+| Status messages: shown to others, cleared, limited to 100 characters, refused while text-muted, flood-limited | Unit- and integration-tested | `tst_messages`, `tst_servercore`, `tst_moderation_server`, `tst_moderation_ui` |
 | Protocol codec, framing, versions, session rules | Unit-tested and fuzzed | `tst_messages` (126 cases, including every moderation message), `tst_frame`, `tst_version`, `tst_session` (22); fuzzers for frames, messages and sessions |
 | Server rules: login, roles, channels, text, flood control | Unit-tested and fuzzed | `tst_servercore` (21); `fuzz_server_core` (311,308 inputs locally, no failures) |
 | Argon2id hashing, certificate generation, server database (schema 2, upgrade from Phase 3) | Unit-tested on Linux and Windows | `tst_passwordhash`, `tst_certificate`, `tst_serverdatabase` (8) |
@@ -70,14 +79,14 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Audio engine: Opus, jitter buffer, mixing, voice activation, push-to-talk, mute, deafen, user volume, device recovery | Unit-tested with a synthetic sound device (tone detection) | `tst_audio_core` (17), `tst_audio_engine` (15 with Phase 7) |
 | Noise suppression, automatic gain, echo cancellation (also while both people talk) | Unit-tested on generated speech, noise and echo | `tst_voice_processing` (9); quality and cost in the [benchmarks](audio/benchmarks.md) |
 | Voice effects: filter responses, voice changer pitch | Unit-tested (measured gains and pitch) | `tst_voice_effects` (6) |
-| Reading WAV, FLAC and MP3 files in pieces, resampling, seeking, refusing other files | Unit-tested | `tst_media_file` (5) |
+| Reading WAV, FLAC and MP3 files in pieces, resampling, seeking, refusing other files and damaged ones | Unit-tested | `tst_media_file` (6, including the damaged FLAC file fuzzing found) |
 | Streaming a file at real speed, pause, skip, stop, end; muting others' files; sharing computer audio with and without leaving OpenTalk out (own sound 32–43 dB lower in the fallback) | Unit-tested with synthetic devices, including a simulated Windows 10 loopback | `tst_audio_engine` |
 | Files and computer audio in the app: menu, shortcuts, status, labels for listeners, announcements, muting, warning on Windows 10, stop on disconnect, guests refused | Integration-tested (offscreen, two windows and a real server) | `tst_media_ui` (7) |
 | `media.transmit` enforced separately from voice, per channel; voice mutes silence streams too | Unit-tested | `tst_moderation_server` (`streamingFilesNeedsItsOwnPermission`) |
 | The example bot plays files from its folder only, as media | Integration-tested against a real server | `tst_examples` |
 | Files and computer audio with real devices on Windows 10 and 11 | **Not yet verified** | NVDA script steps 65–74 |
 | Voice encryption, forwarding and fallback | Unit-tested, fuzzed and integration-tested over real sockets | `tst_packetcipher` (10), `tst_voicerouter` (10), `tst_voice_session` (5 tests: UDP, TCP fallback, a server without UDP, channel isolation, a tone travelling end to end); `fuzz_voice_router` (434,200 inputs locally, no failures) |
-| Voice in the app: push-to-talk key, audio menu, settings pages, talking indicators, per-user volume | Unit- and integration-tested (offscreen) | `tst_pushtotalk` (10), `tst_mainwindow` (11), `tst_mainwindow_online` voice test |
+| Voice in the app: push-to-talk key, audio menu, settings pages, talking indicators, per-user volume | Unit- and integration-tested (offscreen) | `tst_pushtotalk` (10), `tst_mainwindow` (16 with Phase 9), `tst_mainwindow_online` voice test |
 | Audio performance | Measured on a VM without sound hardware | [Benchmarks](audio/benchmarks.md) |
 | Remembered passwords: only after a successful login, filled in next time, forgotten when unticked or the server is deleted | Integration-tested (offscreen, real server); the real Credential Manager is tested on Windows CI | `tst_remember_password` (5), `tst_credentialstore` |
 | Server backups: VACUUM INTO while running, integrity and version checks, schedule and retention, restore with a safety copy, refusal while a server runs, one server per data folder | Unit- and integration-tested against the real program | `tst_serverdatabase`, `tst_servercore` (`automaticBackupsFollowTheSchedule`), `tst_server_process` |
@@ -87,10 +96,10 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Licence notices: every DLL in the package is covered, licence files present | Checked in Windows CI | Packaging step fails on an unlisted DLL; `THIRD-PARTY-NOTICES.txt`, `licenses/` |
 | Packaged OpenSSL is from the 3.5 LTS series | Checked in Windows CI | Smoke test reads the server's "TLS library" line |
 | Server container image: start, connect, automatic backup, graceful stop | Tested in CI and in the sandbox | "Server container image" job |
-| Static analysis | clang-tidy clean on all sources ([rules](../.clang-tidy)); CodeQL security queries run in CI | CI "Static analysis" step, CodeQL workflow |
-| Fuzzing with full instrumentation | 3 minutes per fuzzer locally (28 October 2026): frames 539,000 runs, messages 4.75 million, sessions 666,000, server core 77,000, voice router 523,000, audio files 58,000. No failures in OpenTalk's code. | Nightly workflow runs 10 minutes each. Before 28 October only the harnesses were instrumented, so older fuzzing figures say less than they seemed to. The audio-file fuzzer found undefined behaviour in miniaudio's FLAC seeking (recorded in the [third-party register](licensing/third-party-register.md)). |
+| Static analysis | clang-tidy clean on all sources ([rules](../.clang-tidy)); CodeQL security and quality queries run in CI on OpenTalk's own code, with the findings listed in the job log | CI "Static analysis" step, CodeQL workflow |
+| Fuzzing with full instrumentation | 3 minutes per fuzzer locally (28 October 2026): frames 539,000 runs, messages 4.75 million, sessions 666,000, server core 77,000, voice router 523,000, audio files 58,000. No failures in OpenTalk's code. | Nightly workflow runs 10 minutes each. Before 28 October only the harnesses were instrumented, so older fuzzing figures say less than they seemed to. The audio-file fuzzer found undefined behaviour in miniaudio's FLAC seeking and, in CI on 29 October, an out-of-bounds read there, now patched. After the patch, 15 minutes on two workers (about 124,000 runs on one) found nothing. Both are recorded in the [third-party register](licensing/third-party-register.md). |
 | Voice with real microphones and speakers on Windows | **Not yet verified** | Needs `opentalk-audio-bench device-loopback` and a listening test |
-| All tests under AddressSanitizer and UBSan | Passing (39 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
+| All tests under AddressSanitizer and UBSan | Passing (40 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
 | Portable Windows zip | Built and smoke-tested in CI | With only Windows on `PATH`, the smoke test generates a certificate, logs in, runs the Opus benchmark and sends voice through a server |
 | NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 74 steps |
 | Ctrl+C shutdown of `opentalk-server` in a Windows console | **Not yet verified manually** | Shutdown when the app closes the server's input is tested on Windows CI |
@@ -109,9 +118,9 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 ## Commands that were run (Linux sandbox, Ubuntu 24.04)
 
 ```sh
-cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 39/39 pass
+cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug   # 40/40 pass
 run-clang-tidy -p build/linux-debug -quiet "$PWD/src/.*\.cpp$"                              # no findings
-cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 39/39 pass
+cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan    # 40/40 pass
 cmake --preset linux-fuzz  && cmake --build --preset linux-fuzz                                 # 6 fuzzers
 docker build -t opentalk-server . && docker run ... && opentalk-ping ...                        # container works
 build/linux-fuzz/tests/fuzz/fuzz_voice_router -max_total_time=60 corpus/                        # no failures

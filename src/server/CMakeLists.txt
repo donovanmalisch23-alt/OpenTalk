@@ -24,4 +24,4 @@ qt_add_executable(opentalk_server_app main.cpp ShutdownSignal.cpp ShutdownSignal
 set_target_properties(opentalk_server_app PROPERTIES OUTPUT_NAME "opentalk-server")
 target_link_libraries(opentalk_server_app PRIVATE
     OpenTalk::Server OpenTalk::Security OpenTalk::Logging OpenTalk::CompilerOptions)
-target_compile_definitions(opentalk_server_app PRIVATE OPENTALK_VERSION_STRING="${PROJECT_VERSION}")
+target_compile_definitions(opentalk_server_app PRIVATE OPENTALK_VERSION_STRING="${OPENTALK_DISPLAY_VERSION}")

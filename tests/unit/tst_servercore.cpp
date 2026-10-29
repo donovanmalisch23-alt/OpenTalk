@@ -351,6 +351,37 @@ private slots:
         QVERIFY(h.last<TextMessage>(2)->target == TextTarget::Server);
     }
 
+    void statusMessagesAreSharedAndLimited()
+    {
+        Harness h;
+        QVERIFY(h.login(1, QStringLiteral("alice")));
+        QVERIFY(h.login(2, QStringLiteral("bob")));
+        h.send(1, SetStatus{1, QStringLiteral("  back at 5  ")});
+        EXPECT_OK(h.answer(1, 1));
+        const auto update = h.last<UserUpdated>(2);
+        QVERIFY(update && update->userId == h.last<AuthResult>(1)->userId);
+        QCOMPARE(update->status, QStringLiteral("back at 5")); // trimmed
+        // Newcomers see it in the snapshot.
+        QVERIFY(h.login(3, QStringLiteral("Visitor"), true));
+        const auto snapshot = h.last<StateSnapshot>(3);
+        QVERIFY(snapshot);
+        QVERIFY(std::any_of(snapshot->users.cbegin(), snapshot->users.cend(),
+                            [](const UserInfo &u) { return u.status == QLatin1String("back at 5"); }));
+        // Setting the same status again sends no update; clearing it does.
+        const auto updatesBefore = h.all<UserUpdated>(2).size();
+        h.send(1, SetStatus{2, QStringLiteral("back at 5")});
+        EXPECT_OK(h.answer(1, 2));
+        QCOMPARE(h.all<UserUpdated>(2).size(), updatesBefore);
+        h.send(1, SetStatus{3, QString()});
+        EXPECT_OK(h.answer(1, 3));
+        QCOMPARE(h.last<UserUpdated>(2)->status, QString());
+        // Status changes share the chat flood limit.
+        for (quint64 id = 4; id < 10; ++id) {
+            h.send(2, SetStatus{id, QStringLiteral("spam %1").arg(id)});
+        }
+        EXPECT_ERROR(h.answer(2, 9), ErrorCode::RateLimited);
+    }
+
     void chatFloodingIsRateLimited()
     {
         Harness h;

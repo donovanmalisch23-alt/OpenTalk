@@ -5,4 +5,4 @@ qt_add_executable(opentalk_audio_bench main.cpp)
 set_target_properties(opentalk_audio_bench PROPERTIES OUTPUT_NAME "opentalk-audio-bench")
 target_link_libraries(opentalk_audio_bench PRIVATE
     OpenTalk::Audio OpenTalk::Client OpenTalk::Server OpenTalk::Security OpenTalk::Opus OpenTalk::CompilerOptions)
-target_compile_definitions(opentalk_audio_bench PRIVATE OPENTALK_VERSION_STRING="${PROJECT_VERSION}")
+target_compile_definitions(opentalk_audio_bench PRIVATE OPENTALK_VERSION_STRING="${OPENTALK_DISPLAY_VERSION}")

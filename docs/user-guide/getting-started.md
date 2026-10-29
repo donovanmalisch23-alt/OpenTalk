@@ -45,6 +45,18 @@ In the connect dialog, tick **Remember my password**.
 - **When it is stored:** only after the server accepted it.
 - **To forget it:** untick the box and connect, or delete the saved server. You can also delete the "OpenTalk/…" entries in Control Panel, Credential Manager, Windows Credentials.
 
+## Your status message
+
+Server, "Set my status message" (Ctrl+Shift+S) sets a short note, up to 100 characters, such as "back in 10 minutes". Everyone on the server sees it after your name in the channel list. Leave the box empty to clear it. It lasts until you change it or disconnect, and you cannot set one while you are muted from writing.
+
+## Moving your settings to another computer
+
+File, "Export settings" saves your settings to a file; File, "Import settings" reads them on the other computer or copy of OpenTalk. Window positions and the last folder you used are not included, and neither are saved servers or remembered passwords. Before importing, OpenTalk keeps your previous settings as `config\client-settings.before-import-<date>.json`, so you can import that file to go back.
+
+## One copy at a time
+
+Only one copy of OpenTalk can use a data folder at a time. If you start it again, it says it is already running: switch to its window with Alt+Tab. To run two copies, give the second one its own folder with `OpenTalk.exe --data-dir <folder>` (or use a second portable copy).
+
 ## Moving around
 
 | Keys | Go to |

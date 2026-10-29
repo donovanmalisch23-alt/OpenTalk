@@ -56,6 +56,7 @@ Qt exposes widgets to screen readers through **UI Automation** on Windows. Stand
 | Ctrl+Shift+I | Say what is streaming, and where |
 | Ctrl+Shift+C | Share computer audio on or off (Windows) |
 | Ctrl+Shift+A | Administration (moderators and administrators) |
+| Ctrl+Shift+S | Set or clear your status message (shown to everyone after your name) |
 | Ctrl+Tab / Ctrl+Shift+Tab, F5 (Administration) | Next / previous tab; reload the tab |
 | Ctrl+Q | Exit |
 | Alt+F, Alt+R, Alt+N, Alt+A, Alt+O, Alt+P, Alt+V, Alt+H | File, Server, Channel, Audio, Moderation, Plugins, View and Help menus |

@@ -120,6 +120,7 @@ bool ClientState::apply(const Message &message)
             const UserInfo before = *it;
             it->role = static_cast<Role>(updated->roleId);
             it->flags = updated->flags;
+            it->status = updated->status;
             if (updated->userId == m_self.userId) {
                 m_self.role = it->role;
             }

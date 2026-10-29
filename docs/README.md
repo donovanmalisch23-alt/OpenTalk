@@ -16,6 +16,7 @@ Every document marks features with one of these states, so nothing planned is mi
 
 - [Project brief: summary and requirements](project-brief.md)
 - [Current status and verification report](status.md)
+- [Release notes for 1.0.0-rc.1](release-notes/1.0.0-rc.1.md) and its [acceptance checklist](release-notes/1.0.0-rc.1-acceptance.md)
 - [Roadmap](roadmap.md)
 - [Risk assessment](risk-assessment.md)
 
@@ -32,7 +33,7 @@ Every document marks features with one of these states, so nothing planned is mi
 
 ## Using and extending
 
-- [Getting started: installing, connecting, remembered passwords](user-guide/getting-started.md)
+- [Getting started: installing, connecting, remembered passwords, status messages, moving settings](user-guide/getting-started.md)
 - [Voice and sounds (user guide)](user-guide/voice-and-sounds.md)
 - [Reports, sanctions and appeals (user guide)](user-guide/moderation.md)
 - [Plugins (user guide)](user-guide/plugins.md)
@@ -46,5 +47,6 @@ Every document marks features with one of these states, so nothing planned is mi
 ## Development
 
 - [Building and testing](development/building.md)
+- [Making a release](development/releasing.md)
 - [Signing releases: options for the owner](development/release-signing.md)
 - [Client settings reference](reference/client-settings.md)

@@ -45,7 +45,13 @@ Plugins, "Manage plugins", then "Show log" shows what a plugin reported. A plugi
 - **App log:** `logs\opentalk-client.log` in the data folder. Help, About OpenTalk, shows where the data folder is. Settings, "Logging and Diagnostics", can switch to more detail.
 - **Server log:** the server's console output, or `journalctl -u opentalk-server` or `docker logs`.
 - **What logs contain:** at the default level, no passwords, message text or IP addresses. Read a log before you share it anyway.
-- **Where to report:** open an issue on the project's GitHub page, with your Windows version, your OpenTalk version (Help, About) and what you did. Report security problems privately, as described in `SECURITY.md`.
+- **Support file:** Help, "Create a support file" collects what helps to find a problem: OpenTalk's version, Windows, the sound devices, plugins, your settings and the last 200 lines of the log. It leaves out passwords, messages, server addresses, other people's names, your Windows user folder (shown as `%USERPROFILE%`) and folders you used. The dialog shows the whole file first; read it, then save it or copy it.
+- **Where to report:** open an issue on the project's GitHub page, describe what you did and what happened, and attach the support file. Report security problems privately, as described in `SECURITY.md`.
+- **"OpenTalk did not close properly last time":** OpenTalk crashed or was ended (for example by Task Manager or a power cut). If it crashed, please report it with a support file; the end of the log shows what it was doing.
+
+## "OpenTalk is already running"
+
+Another copy is using the same data folder: switch to it with Alt+Tab. If you are sure no copy is running (for example, the portable copy is on a USB drive that was last used on another computer, which then crashed), delete `opentalk.lock` in the data folder.
 
 ## Starting fresh
 

@@ -3,12 +3,14 @@ add_library(opentalk_storage STATIC
     include/opentalk/storage/AppPaths.h
     include/opentalk/storage/ClientSettings.h
     include/opentalk/storage/CredentialStore.h
+    include/opentalk/storage/DataFolderLock.h
     include/opentalk/storage/SettingsSchema.h
     include/opentalk/storage/SettingsStore.h
     include/opentalk/storage/ServerProfiles.h
     AppPaths.cpp
     ClientSettings.cpp
     CredentialStore.cpp
+    DataFolderLock.cpp
     SettingsSchema.cpp
     SettingsStore.cpp
     ServerProfiles.cpp)

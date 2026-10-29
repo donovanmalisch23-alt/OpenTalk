@@ -68,6 +68,7 @@ struct User {
     bool bot = false; ///< The account is a bot (since SDK 0.3).
     bool voiceMuted = false;
     bool textMuted = false;
+    QString status; ///< The user's status message, if any (since SDK 0.4).
 };
 
 /// Kinds of audio a client can send (since SDK 0.3).
@@ -209,6 +210,8 @@ public:
     quint64 sendDirectMessage(quint32 userId, const QString &text);
     /// A message to everyone on the server; needs the broadcast.send permission.
     quint64 sendServerMessage(const QString &text);
+    /// Sets this client's status message (up to 100 characters; empty clears it). Since SDK 0.4.
+    quint64 setStatus(const QString &status);
 
     /// True once audio can be sent (after each login; see audioReady()).
     bool isAudioReady() const;
@@ -236,7 +239,7 @@ signals:
     void userLeft(const opentalk::sdk::User &user);
     void userMoved(const opentalk::sdk::User &user);
     void textReceived(const opentalk::sdk::TextMessage &message);
-    /// A user's role, mute or bot status changed.
+    /// A user's role, mutes, bot status or status message changed.
     void userUpdated(const opentalk::sdk::User &user);
     /// Audio can be sent (after each login).
     void audioReady();

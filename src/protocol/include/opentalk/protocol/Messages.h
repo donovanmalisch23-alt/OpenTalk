@@ -42,6 +42,7 @@ enum class MessageType : quint16 {
     UserLeft = 0x0201,
     UserMoved = 0x0202,
     UserUpdated = 0x0203,
+    SetStatus = 0x0210,
     // Text (0x0300-0x03FF)
     SendText = 0x0300,
     TextMessage = 0x0301,
@@ -127,6 +128,7 @@ enum UserFlag : quint32 {
 inline constexpr qsizetype kMaxNameLength = 128;       ///< Client and server software names.
 inline constexpr qsizetype kMaxDetailLength = 1024;    ///< Error detail text.
 inline constexpr qsizetype kMaxDisplayNameLength = 32; ///< User and guest names.
+inline constexpr qsizetype kMaxStatusLength = 100;     ///< A user's status message.
 inline constexpr qsizetype kMaxChannelNameLength = 64;
 inline constexpr qsizetype kMaxTopicLength = 256;
 inline constexpr qsizetype kMaxTextLength = 2000;       ///< One chat message.
@@ -231,6 +233,7 @@ struct UserInfo {
     Role role = Role::Guest;
     quint32 channelId = kRootChannelId;
     quint32 flags = 0; ///< UserFlag bits
+    QString status;    ///< Optional status message (see SetStatus); empty when none.
     friend bool operator==(const UserInfo &, const UserInfo &) = default;
 };
 
@@ -373,7 +376,8 @@ using Message =
                  RolesChanged, CapabilitiesChanged, SanctionNotice, MoveUser, ApplySanction, RevokeSanction,
                  ListRequest, ListResult, SetUserRole, ReportUser, ResolveReport, SubmitAppeal, DecideAppeal, ReadAudit,
                  AuditPage, CreateAccount, DeleteAccount, SetAccountPassword, SaveRole, DeleteRole, AddRule, DeleteRule,
-                 ServerSettingsRequest, ServerSettingsResult, GetServerStats, ServerStatsResult, TransferOwnership>;
+                 ServerSettingsRequest, ServerSettingsResult, GetServerStats, ServerStatsResult, TransferOwnership,
+                 SetStatus>;
 
 MessageType messageType(const Message &message);
 

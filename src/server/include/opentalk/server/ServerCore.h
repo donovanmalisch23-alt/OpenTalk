@@ -134,6 +134,9 @@ private:
     void editChannel(Client &client, const protocol::EditChannel &request);
     void finishEditChannel(quint32 clientId, const protocol::EditChannel &request, const QByteArray &passwordHash);
     void sendText(Client &client, const protocol::SendText &request);
+    void setStatus(Client &client, const protocol::SetStatus &request);
+    /// The per-user chat flood limit (shared by messages and status changes).
+    bool takeTextToken(Client &client);
     void moveUser(Client &client, quint32 channelId);
     void removeIfEmptyTemporary(quint32 channelId);
 

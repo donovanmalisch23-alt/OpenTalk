@@ -202,7 +202,7 @@ void ServerCore::refreshUser(Client &client)
         emit sendTo(client.id, CapabilitiesChanged{capabilities, channelCapabilities});
     }
     if (changed) {
-        broadcast(UserUpdated{client.id, static_cast<quint32>(client.user.role), flags});
+        broadcast(UserUpdated{client.id, static_cast<quint32>(client.user.role), flags, client.user.status});
     }
 }
 
@@ -728,7 +728,7 @@ void ServerCore::setUserRole(Client &actor, const SetUserRole &request)
     reply(actor.id, request.requestId);
     if (Client *target = onlineAccount(account->id)) {
         target->user.role = static_cast<Role>(request.roleId);
-        broadcast(UserUpdated{target->id, request.roleId, target->user.flags});
+        broadcast(UserUpdated{target->id, request.roleId, target->user.flags, target->user.status});
         refreshUser(*target);
     }
 }
@@ -1332,11 +1332,12 @@ void ServerCore::transferOwnership(Client &actor, const TransferOwnership &reque
     audit(&actor, QStringLiteral("owner.transferred"), account->username);
     reply(actor.id, request.requestId);
     actor.user.role = Role::Admin;
-    broadcast(UserUpdated{actor.id, static_cast<quint32>(Role::Admin), actor.user.flags});
+    broadcast(UserUpdated{actor.id, static_cast<quint32>(Role::Admin), actor.user.flags, actor.user.status});
     refreshUser(actor);
     if (Client *newOwner = onlineAccount(account->id)) {
         newOwner->user.role = Role::Owner;
-        broadcast(UserUpdated{newOwner->id, static_cast<quint32>(Role::Owner), newOwner->user.flags});
+        broadcast(
+            UserUpdated{newOwner->id, static_cast<quint32>(Role::Owner), newOwner->user.flags, newOwner->user.status});
         refreshUser(*newOwner);
     }
 }

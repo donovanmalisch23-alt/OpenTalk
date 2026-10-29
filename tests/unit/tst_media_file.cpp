@@ -129,6 +129,24 @@ private slots:
         QVERIFY(!garbage.openData(QByteArray(1000, 'x'), QStringLiteral("x"), nullptr));
     }
 
+    void survivesADamagedFlacFile()
+    {
+        // Found by fuzzing: after a frame with a damaged header, seeking back used to
+        // "seek within" that frame although it was never decoded, then read outside
+        // miniaudio's decoded-samples buffer. With the patch in third_party/miniaudio the
+        // seek fails and nothing is read from the damaged frame.
+        QFile bytes(QStringLiteral(OPENTALK_MEDIA_SAMPLES "/damaged-flac-seek.flac"));
+        QVERIFY(bytes.open(QIODevice::ReadOnly));
+        MediaFile file;
+        QVERIFY(file.openData(bytes.readAll(), QStringLiteral("damaged"), nullptr));
+        std::vector<float> frame(kFrameSamples);
+        for (int i = 0; i < 500 && file.read(frame) == frame.size(); ++i) {
+        }
+        QCOMPARE(file.durationMs(), 100);
+        QVERIFY(!file.seekMs(50));
+        QCOMPARE(file.read(frame), std::size_t{0});
+    }
+
     void refusesWhatItCannotRead()
     {
         QTemporaryDir dir;

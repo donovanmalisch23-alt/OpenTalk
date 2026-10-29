@@ -11,6 +11,8 @@ add_library(opentalk_ui STATIC
     include/opentalk/ui/PluginDialogs.h
     include/opentalk/ui/PushToTalkMonitor.h
     include/opentalk/ui/SettingsDialog.h
+    include/opentalk/ui/SupportFileDialog.h
+    include/opentalk/ui/SupportReport.h
     AdminDialog.cpp
     AnnouncementQueue.cpp
     AudioController.cpp
@@ -23,7 +25,9 @@ add_library(opentalk_ui STATIC
     RequestTracker.h
     UiHelpers.h
     PushToTalkMonitor.cpp
-    SettingsDialog.cpp)
+    SettingsDialog.cpp
+    SupportFileDialog.cpp
+    SupportReport.cpp)
 add_library(OpenTalk::Ui ALIAS opentalk_ui)
 target_include_directories(opentalk_ui PUBLIC include)
 target_link_libraries(opentalk_ui
@@ -31,4 +35,4 @@ target_link_libraries(opentalk_ui
            OpenTalk::Plugins
     PRIVATE OpenTalk::CompilerOptions)
 target_compile_definitions(opentalk_ui PRIVATE
-    OPENTALK_VERSION_STRING="${PROJECT_VERSION}")
+    OPENTALK_VERSION_STRING="${OPENTALK_DISPLAY_VERSION}")

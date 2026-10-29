@@ -66,7 +66,7 @@ private slots:
             AuthResult{7, QStringLiteral("alice"), Role::Admin, {1, 2, 33}, {30, 32}});
         const ChannelInfo root{kRootChannelId, 0, QString(), QString(), true, false, 0};
         const ChannelInfo lobby{1000, kRootChannelId, QStringLiteral("Lobby"), QStringLiteral("Hi"), true, true, 10};
-        const UserInfo alice{7, QStringLiteral("alice"), Role::User, 1000};
+        const UserInfo alice{7, QStringLiteral("alice"), Role::User, 1000, 0, QStringLiteral("back at 5")};
         const RoleInfo moderator{4, QStringLiteral("Moderator"), 50, {1, 33}, true};
         QTest::newRow("snapshot") << Message(StateSnapshot{{root, lobby}, {alice}, {moderator}});
         QTest::newRow("empty snapshot") << Message(StateSnapshot{});
@@ -96,14 +96,18 @@ private slots:
         QTest::newRow("audio from server") << Message(AudioData{AudioStream::SystemAudio, 1, 42, QByteArray("x")});
 
         // Moderation and administration (docs/protocol/moderation.md).
-        const UserInfo muted{8, QStringLiteral("bob"), Role::Moderator, 1000, VoiceMutedFlag | BotFlag};
+        const UserInfo muted{8, QStringLiteral("bob"), Role::Moderator, 1000, VoiceMutedFlag | BotFlag, QString()};
         QTest::newRow("user with flags") << Message(UserJoined{muted});
         QTest::newRow("channel updated") << Message(ChannelUpdated{lobby});
         QTest::newRow("edit channel") << Message(
             EditChannel{11, 1000, QStringLiteral("Lobby 2"), QStringLiteral("New"), 5, true, QStringLiteral("pw")});
         QTest::newRow("edit channel removing password")
             << Message(EditChannel{11, 1000, QStringLiteral("Lobby"), QString(), 0, true, QString()});
-        QTest::newRow("user updated") << Message(UserUpdated{8, 105, TextMutedFlag | RestrictedFlag});
+        QTest::newRow("user updated") << Message(UserUpdated{8, 105, TextMutedFlag | RestrictedFlag, QString()});
+        QTest::newRow("user updated with status")
+            << Message(UserUpdated{8, 1, 0, QStringLiteral("In a meeting \u2013 back soon")});
+        QTest::newRow("set status") << Message(SetStatus{12, QStringLiteral("away")});
+        QTest::newRow("clear status") << Message(SetStatus{13, QString()});
         QTest::newRow("roles changed") << Message(
             RolesChanged{{moderator, RoleInfo{105, QStringLiteral("Greeter"), 20, {31}, false}}});
         QTest::newRow("capabilities changed") << Message(CapabilitiesChanged{{1, 10, 11}, {33}});
@@ -383,7 +387,7 @@ private slots:
     {
         StateSnapshot big;
         for (quint32 i = 0; i < 5000; ++i) {
-            big.users.append(UserInfo{i + 1, QString(32, QLatin1Char('n')), Role::User, kRootChannelId});
+            big.users.append(UserInfo{i + 1, QString(32, QLatin1Char('n')), Role::User, kRootChannelId, 0, QString()});
         }
         QVERIFY(encodeMessage(big, 1024).isEmpty());
         QVERIFY(!encodeMessage(big).isEmpty());

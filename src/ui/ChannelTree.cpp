@@ -47,7 +47,8 @@ QString ChannelTree::channelLabel(const QString &name, int userCount, bool hasPa
     return label;
 }
 
-QString ChannelTree::userLabel(const QString &name, bool isSelf, const QString &role, quint32 flags)
+QString ChannelTree::userLabel(const QString &name, bool isSelf, const QString &role, quint32 flags,
+                               const QString &status)
 {
     QString label = name;
     if (isSelf) {
@@ -70,6 +71,9 @@ QString ChannelTree::userLabel(const QString &name, bool isSelf, const QString &
     }
     if ((flags & protocol::RestrictedFlag) != 0) {
         label += tr(", restricted");
+    }
+    if (!status.isEmpty()) {
+        label += tr(", status: %1").arg(status);
     }
     return label;
 }
@@ -131,9 +135,9 @@ void ChannelTree::rebuild(const client::ClientState &state, const QString &serve
         }
         channelItems.insert(channel.id, item);
         for (const protocol::UserInfo &user : members) {
-            auto *userItem =
-                new QTreeWidgetItem(item, {userLabel(user.name, user.id == state.selfId(),
-                                                     roleLabel(state, static_cast<quint32>(user.role)), user.flags)});
+            auto *userItem = new QTreeWidgetItem(
+                item, {userLabel(user.name, user.id == state.selfId(),
+                                 roleLabel(state, static_cast<quint32>(user.role)), user.flags, user.status)});
             userItem->setData(0, kKindRole, static_cast<int>(ItemKind::User));
             userItem->setData(0, kIdRole, user.id);
             if (m_activity.contains(user.id)) {

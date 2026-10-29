@@ -10,10 +10,11 @@ These messages extend [protocol version 1](proposal.md). They use the same frami
 |---|---|
 | AuthResult (0x0008) | 3: role is now any role ID (see below). 4: capabilities held server-wide (array of capability numbers). 5: capabilities held only in some channels, for example by a channel moderator (array, optional). |
 | StateSnapshot (0x0100) | 3: roles (array of roles, optional). |
-| User fields | 3: role ID. 5: flags (optional; bit 0 voice muted, bit 1 text muted, bit 2 restricted, bit 3 bot (Phase 6)). |
+| User fields | 3: role ID. 5: flags (optional; bit 0 voice muted, bit 1 text muted, bit 2 restricted, bit 3 bot (Phase 6)). 6: status message (optional, up to 100 characters, no control characters; Phase 9). |
 | ChannelUpdated (0x0103) | S→C. A channel (same fields as ChannelAdded) after someone edited it. |
 | EditChannel (0x0113) | C→S. 1: request ID, 2: channel ID, 3: name, 4: topic, 5: maximum users, 6: change password (bool), 7: new password (omit to remove it). Needs `channel.edit` there. |
-| UserUpdated (0x0203) | S→C. 1: user ID, 2: role ID, 3: flags. Sent to everyone when someone's role or mute changes. |
+| UserUpdated (0x0203) | S→C. 1: user ID, 2: role ID, 3: flags, 4: status message (optional; Phase 9). Sent to everyone when someone's role, mute or status message changes. |
+| SetStatus (0x0210) | C→S (Phase 9). 1: request ID, 2: status message (up to 100 characters; omit or leave empty to clear it). Everyone sees it, so it is refused with `Muted` while the sender is text-muted (clearing is always allowed) and counts towards the chat flood limit. Answered by RequestDone. The status lasts until the user changes it or disconnects. |
 | Error | New codes: 17 Banned, 18 Kicked, 19 Muted. An Error without a request ID ends the session (see [proposal](proposal.md)). |
 
 **Role IDs:** 0 Guest, 1 Registered user, 2 Administrator, 3 Owner, 4 Moderator, 5 Restricted. Owners create further roles with IDs from 100. A **role** is 1: ID, 2: name, 3: rank (0–100), 4: capabilities (array), 5: built in (bool).

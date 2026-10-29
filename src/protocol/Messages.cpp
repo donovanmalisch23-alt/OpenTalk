@@ -65,6 +65,7 @@ constexpr qint64 kUsrName = 2;
 constexpr qint64 kUsrRole = 3;
 constexpr qint64 kUsrChannel = 4;
 constexpr qint64 kUsrFlags = 5;
+constexpr qint64 kUsrStatus = 6;
 // StateSnapshot
 constexpr qint64 kSnapChannels = 1;
 constexpr qint64 kSnapUsers = 2;
@@ -127,6 +128,9 @@ QCborMap userToCbor(const UserInfo &u)
                  {key::kUsrChannel, static_cast<qint64>(u.channelId)}};
     if (u.flags != 0) {
         map.insert(key::kUsrFlags, static_cast<qint64>(u.flags));
+    }
+    if (!u.status.isEmpty()) {
+        map.insert(key::kUsrStatus, u.status);
     }
     return map;
 }
@@ -354,6 +358,7 @@ UserInfo readUser(FieldReader &r)
     u.role = static_cast<Role>(r.integer<quint32>(key::kUsrRole, "user.role"));
     u.channelId = r.integer<quint32>(key::kUsrChannel, "user.channelId");
     u.flags = r.optionalInteger<quint32>(key::kUsrFlags, "user.flags").value_or(0);
+    u.status = r.plainText(key::kUsrStatus, "user.status", kMaxStatusLength, false);
     if (r.ok() && (u.id == 0 || u.channelId == 0)) {
         r.fail(QStringLiteral("user: invalid id"));
     }
@@ -485,6 +490,7 @@ MessageType messageType(const Message &message)
         MessageType operator()(const GetServerStats &) const { return MessageType::GetServerStats; }
         MessageType operator()(const ServerStatsResult &) const { return MessageType::ServerStatsResult; }
         MessageType operator()(const TransferOwnership &) const { return MessageType::TransferOwnership; }
+        MessageType operator()(const SetStatus &) const { return MessageType::SetStatus; }
     };
     return std::visit(Visitor{}, message);
 }
@@ -524,6 +530,7 @@ bool isClientToServer(MessageType type)
     case MessageType::ServerSettingsRequest:
     case MessageType::GetServerStats:
     case MessageType::TransferOwnership:
+    case MessageType::SetStatus:
         return true;
     default:
         return false;

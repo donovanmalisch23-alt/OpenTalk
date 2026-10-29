@@ -18,6 +18,8 @@
 #include "opentalk/ui/ModerationDialogs.h"
 #include "opentalk/ui/PluginDialogs.h"
 #include "opentalk/ui/SettingsDialog.h"
+#include "opentalk/ui/SupportFileDialog.h"
+#include "opentalk/ui/SupportReport.h"
 
 #include <QAccessible>
 #include <QAction>
@@ -38,7 +40,9 @@
 #include <QPushButton>
 #include <QSplitter>
 #include <QSslSocket>
+#include <QStandardPaths>
 #include <QStatusBar>
+#include <QSysInfo>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -302,6 +306,12 @@ void MainWindow::buildPlugins()
 void MainWindow::startPlugins()
 {
     m_pluginHost->startEnabled();
+}
+
+void MainWindow::noteUnexpectedExit()
+{
+    appendHistory(tr("OpenTalk did not close properly last time. If it stopped unexpectedly, please report it: "
+                     "Help, Create a support file, describes what is needed."));
 }
 
 void MainWindow::rebuildPluginsMenu()
@@ -699,6 +709,10 @@ void MainWindow::buildMenus()
     QMenu *fileMenu = menuBar()->addMenu(tr("&File"));
     m_settingsAction = fileMenu->addAction(tr("&Settings..."), this, &MainWindow::openSettings);
     m_settingsAction->setShortcut(QKeySequence(Qt::Key_F4));
+    fileMenu->addAction(tr("E&xport settings..."), this, &MainWindow::exportSettings)
+        ->setObjectName(QStringLiteral("exportSettingsAction"));
+    fileMenu->addAction(tr("&Import settings..."), this, &MainWindow::importSettings)
+        ->setObjectName(QStringLiteral("importSettingsAction"));
     fileMenu->addSeparator();
     QAction *exitAction = fileMenu->addAction(tr("E&xit"), this, &QWidget::close);
     exitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q));
@@ -715,6 +729,9 @@ void MainWindow::buildMenus()
     m_stopHostingAction = serverMenu->addAction(tr("&Stop hosting"), this, &MainWindow::stopLocalServer);
     serverMenu->addSeparator();
     m_broadcastAction = serverMenu->addAction(tr("Send a message to &everyone..."), this, &MainWindow::sendBroadcast);
+    m_statusAction = serverMenu->addAction(tr("Set my status &message..."), this, &MainWindow::setStatusMessage);
+    m_statusAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    m_statusAction->setObjectName(QStringLiteral("statusAction"));
 
     QMenu *channelMenu = menuBar()->addMenu(tr("Cha&nnel"));
     m_joinAction = channelMenu->addAction(tr("&Join selected channel"), this, [this] {
@@ -857,6 +874,8 @@ void MainWindow::buildMenus()
     previous->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F6));
 
     QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
+    helpMenu->addAction(tr("Create a &support file..."), this, &MainWindow::openSupportFile)
+        ->setObjectName(QStringLiteral("supportFileAction"));
     helpMenu->addAction(tr("&About OpenTalk"), this, [this] {
         QMessageBox::about(this, tr("About OpenTalk"),
                            tr("<h3>OpenTalk %1</h3>"
@@ -1302,7 +1321,8 @@ void MainWindow::refreshViews()
         const QString label =
             tr("%1, in %2")
                 .arg(ChannelTree::userLabel(user.name, user.id == state.selfId(),
-                                            ChannelTree::roleLabel(state, static_cast<quint32>(user.role)), user.flags),
+                                            ChannelTree::roleLabel(state, static_cast<quint32>(user.role)), user.flags,
+                                            user.status),
                      channelPath(user.channelId));
         auto *item = new QListWidgetItem(label, m_userList);
         item->setData(kUserIdRole, user.id);
@@ -1355,6 +1375,7 @@ void MainWindow::updateActions()
     offer(m_adminAction, state.canModerate(), true);
     m_reportAction->setEnabled(otherUser);
     m_mySanctionsAction->setEnabled(connected);
+    m_statusAction->setEnabled(connected);
     updateMediaActions();
 }
 
@@ -1678,6 +1699,33 @@ void MainWindow::openAdministration()
     dialog.exec();
 }
 
+void MainWindow::setStatusMessage()
+{
+    const client::ClientState &state = m_connection.serverState();
+    const auto self = state.user(state.selfId());
+    if (m_connection.state() != client::ConnectionState::Connected || !self) {
+        return;
+    }
+    QInputDialog dialog(this);
+    dialog.setWindowTitle(tr("Status message"));
+    dialog.setLabelText(tr("Your status, shown to everyone next to your name, for example \"back at 5\". Leave it "
+                           "empty to clear it:"));
+    dialog.setTextValue(self->status);
+    if (auto *edit = dialog.findChild<QLineEdit *>()) {
+        edit->setMaxLength(static_cast<int>(protocol::kMaxStatusLength));
+        edit->setAccessibleName(tr("Status message"));
+    }
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    QString status = dialog.textValue().trimmed();
+    status.removeIf(
+        [](QChar c) { return c.category() == QChar::Other_Control || c.category() == QChar::Other_Format; });
+    const quint64 id = m_connection.sendRequest(protocol::SetStatus{0, status});
+    track(id, tr("Your status could not be set"),
+          status.isEmpty() ? tr("Your status is cleared.") : tr("Your status is now: %1").arg(status));
+}
+
 void MainWindow::sendBroadcast()
 {
     if (m_connection.state() != client::ConnectionState::Connected ||
@@ -1750,6 +1798,12 @@ void MainWindow::onUserUpdated(const protocol::UserInfo &user, const protocol::U
     if (user.channelId != state.currentChannelId()) {
         return;
     }
+    if (user.status != before.status) {
+        const QString text = user.status.isEmpty() ? tr("%1 cleared their status.").arg(user.name)
+                                                   : tr("%1's status: %2").arg(user.name, user.status);
+        appendHistory(text);
+        announce(static_cast<int>(Category::Presence), text);
+    }
     const bool mutedBefore = (before.flags & protocol::VoiceMutedFlag) != 0;
     const bool mutedNow = (user.flags & protocol::VoiceMutedFlag) != 0;
     if (mutedBefore != mutedNow) {
@@ -1774,6 +1828,125 @@ void MainWindow::openSettingsAt(const QString &category)
     SettingsDialog dialog(m_settings, m_paths, m_audio, this);
     if (!category.isEmpty()) {
         dialog.selectCategory(category);
+    }
+    dialog.exec();
+}
+
+void MainWindow::exportSettings()
+{
+    const QString suggested = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+                                  .filePath(QStringLiteral("opentalk-settings.json"));
+    const QString path = m_settingsFileChooser ? m_settingsFileChooser(true)
+                                               : QFileDialog::getSaveFileName(this, tr("Export settings"), suggested,
+                                                                              tr("OpenTalk settings (*.json)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    QString error;
+    if (!m_settings.exportTo(path, storage::client::notExportedKeys(), &error)) {
+        reportError(tr("Export settings"), tr("Could not export the settings: %1").arg(error));
+        return;
+    }
+    const QString text = tr("Settings exported to %1. Saved servers and remembered passwords are not included.")
+                             .arg(QDir::toNativeSeparators(path));
+    appendHistory(text);
+    setStatusText(text);
+}
+
+void MainWindow::importSettings()
+{
+    const QString path = m_settingsFileChooser ? m_settingsFileChooser(false)
+                                               : QFileDialog::getOpenFileName(this, tr("Import settings"), QString(),
+                                                                              tr("OpenTalk settings (*.json)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    // Keep the current settings first, so the import can be undone by importing this file.
+    const QString backup =
+        QFileInfo(m_paths.clientSettingsFile())
+            .absoluteDir()
+            .filePath(QStringLiteral("client-settings.before-import-%1.json")
+                          .arg(QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss"))));
+    QString error;
+    if (!m_settings.exportTo(backup, {}, &error)) {
+        reportError(tr("Import settings"),
+                    tr("Settings were not imported, because the current ones could not be kept first: %1").arg(error));
+        return;
+    }
+    const storage::ImportReport report = m_settings.importFrom(path, storage::client::notExportedKeys());
+    if (!report.ok) {
+        reportError(tr("Import settings"), tr("Could not import the settings: %1.").arg(report.error));
+        return;
+    }
+    if (!m_settings.save(&error)) {
+        reportError(tr("Import settings"), tr("The settings were imported but could not be saved: %1").arg(error));
+    }
+    QString text = tr("Settings imported: %n changed.", nullptr, report.changed);
+    if (!report.skipped.isEmpty()) {
+        text += QLatin1Char(' ') + tr("Not imported: %1.").arg(report.skipped.join(QStringLiteral("; ")));
+    }
+    appendHistory(text + QLatin1Char(' ') +
+                  tr("Your previous settings were kept in %1.").arg(QDir::toNativeSeparators(backup)));
+    setStatusText(text);
+}
+
+QString MainWindow::supportReport() const
+{
+    SupportReportInput input;
+    input.version = QStringLiteral(OPENTALK_VERSION_STRING);
+    input.qtVersion = QString::fromLatin1(qVersion());
+    input.tlsLibrary = QSslSocket::sslLibraryVersionString();
+    input.operatingSystem =
+        QStringLiteral("%1 (kernel %2, %3)")
+            .arg(QSysInfo::prettyProductName(), QSysInfo::kernelVersion(), QSysInfo::currentCpuArchitecture());
+    input.dataMode = storage::toString(m_paths.mode());
+    input.dataFolder = QDir::toNativeSeparators(m_paths.dataRoot());
+    input.homeFolder = QDir::homePath();
+
+    QString connection = client::toString(m_connection.state());
+    if (m_connection.state() == client::ConnectionState::Connected) {
+        connection += !m_connection.isVoiceReady()     ? tr("; voice not set up")
+                      : m_connection.isVoiceUsingUdp() ? tr("; voice over UDP")
+                                                       : tr("; voice over the main connection (UDP blocked)");
+    }
+    input.connection = connection;
+    input.voiceStatus = voiceStatusText();
+    auto describeDevices = [](const QList<audio::AudioDeviceInfo> &devices) {
+        QStringList names;
+        for (const audio::AudioDeviceInfo &device : devices) {
+            names.append(device.isDefault ? device.name + QStringLiteral(" (default)") : device.name);
+        }
+        return names;
+    };
+    input.inputDevices = describeDevices(m_audio->engine().backend().inputDevices());
+    input.outputDevices = describeDevices(m_audio->engine().backend().outputDevices());
+    for (const plugins::InstalledPlugin &plugin : m_pluginRegistry->plugins()) {
+        QString line = plugin.manifest.id.isEmpty() ? plugin.folderName
+                                                    : plugin.manifest.id + QLatin1Char(' ') + plugin.manifest.version;
+        line += plugin.enabled ? QStringLiteral(": on") : QStringLiteral(": off");
+        if (plugin.needsReview) {
+            line += QStringLiteral(", waiting for review");
+        }
+        if (!plugin.problem.isEmpty()) {
+            line += QStringLiteral(", problem: ") + plugin.problem;
+        }
+        input.plugins.append(line);
+    }
+    input.settings = describeSettings(m_settings, storage::client::privateKeys());
+    input.log = readLogTail(m_paths.clientLogFile(), 200);
+    return buildSupportReport(input, QDateTime::currentDateTimeUtc());
+}
+
+void MainWindow::openSupportFile()
+{
+    const QString suggested =
+        QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+            .filePath(QStringLiteral("opentalk-support-%1.txt")
+                          .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmm"))));
+    SupportFileDialog dialog(supportReport(), suggested, this);
+    if (m_supportDialogHook) {
+        m_supportDialogHook(dialog);
+        return;
     }
     dialog.exec();
 }

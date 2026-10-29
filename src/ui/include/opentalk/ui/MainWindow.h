@@ -41,6 +41,7 @@ namespace opentalk::ui {
 class AnnouncementQueue;
 class AudioController;
 class ChannelTree;
+class SupportFileDialog;
 
 /// The primary window: channel tree (with the users in each channel), online users,
 /// conversation history, message input and status bar.
@@ -55,6 +56,7 @@ class ChannelTree;
 ///   Ctrl+T            talk on/off (push-to-talk mode)   Ctrl+M  mute microphone
 ///   Ctrl+Shift+M      mute everything you hear          Ctrl+Shift+V  volume for the selected user
 ///   Ctrl+Shift+A      administration (for moderators and administrators)
+///   Ctrl+Shift+S      set your status message
 ///   Ctrl+Shift+F      stream a file into the channel   Ctrl+Shift+K  pause or resume it
 ///   Ctrl+Shift+J / L  back / forward 10 seconds        Ctrl+Shift+X  stop streaming
 ///   Ctrl+Shift+I      say what is streaming            Ctrl+Shift+C  share computer audio on/off
@@ -108,6 +110,9 @@ public:
     QMenu *pluginsMenu() const { return m_pluginsMenu; }
     /// Starts the plugins the user turned on (the app does this unless --no-plugins).
     void startPlugins();
+    /// Says in the history that OpenTalk did not close properly last time (it crashed or
+    /// was ended), and how to report it.
+    void noteUnexpectedExit();
     QList<QAction *> paneActions() const { return m_paneActions; }
 
     // Hooks that replace dialogs and speech, for automated tests.
@@ -119,6 +124,18 @@ public:
     storage::CredentialStore &credentialStore() { return *m_credentials; }
     /// Replaces the "choose a file to stream" dialog; returns the path, or empty to cancel.
     void setMediaFileChooser(std::function<QString()> chooser) { m_mediaFileChooser = std::move(chooser); }
+    /// Replaces the file dialogs of "Export settings" (forSaving true) and "Import settings".
+    void setSettingsFileChooser(std::function<QString(bool forSaving)> chooser)
+    {
+        m_settingsFileChooser = std::move(chooser);
+    }
+    /// Called with the support-file dialog instead of showing it (tests).
+    void setSupportDialogHook(std::function<void(SupportFileDialog &)> hook) { m_supportDialogHook = std::move(hook); }
+    /// The text of a support file (Help, Create a support file).
+    QString supportReport() const;
+    void exportSettings();
+    void importSettings();
+    void openSupportFile();
 
 public slots:
     void focusPane(opentalk::ui::MainWindow::Pane pane);
@@ -144,6 +161,7 @@ public slots:
     void openMySanctions();
     void openAdministration();
     void sendBroadcast();
+    void setStatusMessage();
     void openPluginManager();
     void streamFile();
     void toggleMediaPaused();
@@ -217,6 +235,8 @@ private:
     ErrorReporter m_errorReporter;
     std::function<void(const QString &)> m_announcementHook;
     std::function<QString()> m_mediaFileChooser;
+    std::function<QString(bool)> m_settingsFileChooser;
+    std::function<void(SupportFileDialog &)> m_supportDialogHook;
     std::unique_ptr<storage::CredentialStore> m_credentials;
     AnnouncementQueue *m_announcements = nullptr;
     QTimer m_refreshTimer;
@@ -254,6 +274,7 @@ private:
     QAction *m_userVolumeAction = nullptr;
     QAction *m_editChannelAction = nullptr;
     QAction *m_broadcastAction = nullptr;
+    QAction *m_statusAction = nullptr;
     QAction *m_warnAction = nullptr;
     QAction *m_muteUserAction = nullptr;
     QAction *m_kickAction = nullptr;

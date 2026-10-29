@@ -88029,6 +88029,34 @@ static MA_INLINE ma_uint8 ma_dr_flac__get_channel_count_from_channel_assignment(
     MA_DR_FLAC_ASSERT(channelAssignment <= 10);
     return lookup[channelAssignment];
 }
+/*
+OpenTalk patch (see third_party/miniaudio/opentalk-flac-seek.patch): true only when the current
+FLAC frame was fully decoded into pDecodedSamples, so its samples may be read. A frame header can
+be read, or a frame skipped while seeking, without being decoded; reading or seeking within such a
+frame read outside the decoded-samples buffer (found by fuzzing).
+*/
+static ma_bool32 ma_dr_flac__current_frame_is_decoded(const ma_dr_flac* pFlac)
+{
+    ma_uint32 blockSize = pFlac->currentFLACFrame.header.blockSizeInPCMFrames;
+    ma_uint8 channelCount;
+    ma_uint8 iChannel;
+    if (pFlac->currentFLACFrame.header.channelAssignment < 0 || pFlac->currentFLACFrame.header.channelAssignment > 10) {
+        return MA_FALSE;
+    }
+    if (blockSize == 0 || blockSize > pFlac->maxBlockSizeInPCMFrames || pFlac->currentFLACFrame.pcmFramesRemaining > blockSize) {
+        return MA_FALSE;
+    }
+    channelCount = ma_dr_flac__get_channel_count_from_channel_assignment(pFlac->currentFLACFrame.header.channelAssignment);
+    if (channelCount != pFlac->channels) {
+        return MA_FALSE;
+    }
+    for (iChannel = 0; iChannel < channelCount; ++iChannel) {
+        if (pFlac->currentFLACFrame.subframes[iChannel].pSamplesS32 != pFlac->pDecodedSamples + ((size_t)blockSize * iChannel)) {
+            return MA_FALSE;
+        }
+    }
+    return MA_TRUE;
+}
 static ma_result ma_dr_flac__decode_flac_frame(ma_dr_flac* pFlac)
 {
     int channelCount;
@@ -90817,6 +90845,8 @@ MA_API ma_uint64 ma_dr_flac_read_pcm_frames_s32(ma_dr_flac* pFlac, ma_uint64 fra
             if (!ma_dr_flac__read_and_decode_next_flac_frame(pFlac)) {
                 break;
             }
+        } else if (!ma_dr_flac__current_frame_is_decoded(pFlac)) {
+            break;  /* OpenTalk patch: never read samples of a frame that was not decoded. */
         } else {
             unsigned int channelCount = ma_dr_flac__get_channel_count_from_channel_assignment(pFlac->currentFLACFrame.header.channelAssignment);
             ma_uint64 iFirstPCMFrame = pFlac->currentFLACFrame.header.blockSizeInPCMFrames - pFlac->currentFLACFrame.pcmFramesRemaining;
@@ -91554,6 +91584,8 @@ MA_API ma_uint64 ma_dr_flac_read_pcm_frames_s16(ma_dr_flac* pFlac, ma_uint64 fra
             if (!ma_dr_flac__read_and_decode_next_flac_frame(pFlac)) {
                 break;
             }
+        } else if (!ma_dr_flac__current_frame_is_decoded(pFlac)) {
+            break;  /* OpenTalk patch: never read samples of a frame that was not decoded. */
         } else {
             unsigned int channelCount = ma_dr_flac__get_channel_count_from_channel_assignment(pFlac->currentFLACFrame.header.channelAssignment);
             ma_uint64 iFirstPCMFrame = pFlac->currentFLACFrame.header.blockSizeInPCMFrames - pFlac->currentFLACFrame.pcmFramesRemaining;
@@ -92281,6 +92313,8 @@ MA_API ma_uint64 ma_dr_flac_read_pcm_frames_f32(ma_dr_flac* pFlac, ma_uint64 fra
             if (!ma_dr_flac__read_and_decode_next_flac_frame(pFlac)) {
                 break;
             }
+        } else if (!ma_dr_flac__current_frame_is_decoded(pFlac)) {
+            break;  /* OpenTalk patch: never read samples of a frame that was not decoded. */
         } else {
             unsigned int channelCount = ma_dr_flac__get_channel_count_from_channel_assignment(pFlac->currentFLACFrame.header.channelAssignment);
             ma_uint64 iFirstPCMFrame = pFlac->currentFLACFrame.header.blockSizeInPCMFrames - pFlac->currentFLACFrame.pcmFramesRemaining;
@@ -92352,7 +92386,7 @@ MA_API ma_bool32 ma_dr_flac_seek_to_pcm_frame(ma_dr_flac* pFlac, ma_uint64 pcmFr
         }
         if (pcmFrameIndex > pFlac->currentPCMFrame) {
             ma_uint32 offset = (ma_uint32)(pcmFrameIndex - pFlac->currentPCMFrame);
-            if (pFlac->currentFLACFrame.pcmFramesRemaining >  offset) {
+            if (pFlac->currentFLACFrame.pcmFramesRemaining >  offset && ma_dr_flac__current_frame_is_decoded(pFlac)) {  /* OpenTalk patch */
                 pFlac->currentFLACFrame.pcmFramesRemaining -= offset;
                 pFlac->currentPCMFrame = pcmFrameIndex;
                 return MA_TRUE;
@@ -92361,7 +92395,7 @@ MA_API ma_bool32 ma_dr_flac_seek_to_pcm_frame(ma_dr_flac* pFlac, ma_uint64 pcmFr
             ma_uint32 offsetAbs = (ma_uint32)(pFlac->currentPCMFrame - pcmFrameIndex);
             ma_uint32 currentFLACFramePCMFrameCount = pFlac->currentFLACFrame.header.blockSizeInPCMFrames;
             ma_uint32 currentFLACFramePCMFramesConsumed = currentFLACFramePCMFrameCount - pFlac->currentFLACFrame.pcmFramesRemaining;
-            if (currentFLACFramePCMFramesConsumed > offsetAbs) {
+            if (currentFLACFramePCMFramesConsumed > offsetAbs && ma_dr_flac__current_frame_is_decoded(pFlac)) {  /* OpenTalk patch */
                 pFlac->currentFLACFrame.pcmFramesRemaining += offsetAbs;
                 pFlac->currentPCMFrame = pcmFrameIndex;
                 return MA_TRUE;

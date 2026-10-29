@@ -11,7 +11,7 @@
 | OpenSSL 3 | TLS 1.3 through Qt's OpenSSL backend ([ADR 0007](architecture/decisions/0007-openssl-tls-backend.md)); certificate generation | Apache-2.0 | Windows: vcpkg (pinned commit). Must be a supported release series before the first public release. |
 | libsodium | Argon2id password hashing | ISC | Windows: vcpkg (pinned commit); Linux: system package. |
 | Opus (libopus) | Voice and media codec | BSD-3-Clause | Windows: vcpkg; Linux: system package ([ADR 0009](architecture/decisions/0009-audio-io-miniaudio.md)). |
-| miniaudio | Audio devices, loopback capture, decoding WAV/FLAC/MP3 | Unlicense or MIT-0 | Vendored, unmodified ([ADR 0009](architecture/decisions/0009-audio-io-miniaudio.md)). |
+| miniaudio | Audio devices, loopback capture, decoding WAV/FLAC/MP3 | Unlicense or MIT-0 | Vendored with one small safety patch to FLAC seeking found by fuzzing (`third_party/miniaudio/opentalk-flac-seek.patch`; [ADR 0009](architecture/decisions/0009-audio-io-miniaudio.md)). |
 | speexdsp | Noise suppression, automatic gain, echo cancellation | BSD-3-Clause | Windows: vcpkg; Linux: system package ([ADR 0010](architecture/decisions/0010-voice-processing-media-and-system-audio.md)). |
 | vcpkg (manifest mode) | Builds OpenSSL and libsodium for Windows | MIT | Pinned with `builtin-baseline` in `vcpkg.json`; build tool only. |
 | CMake, Ninja | Build | BSD-3-Clause, Apache-2.0 | Build tools only; not shipped. |

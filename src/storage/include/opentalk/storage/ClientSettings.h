@@ -3,6 +3,8 @@
 
 #include "opentalk/storage/SettingsSchema.h"
 
+#include <QStringList>
+
 #include <QString>
 
 namespace opentalk::storage::client {
@@ -59,5 +61,14 @@ inline const QString kTransmitContinuous = QStringLiteral("continuous");
 
 /// Builds the schema for client-settings.json. See docs/reference/client-settings.md.
 SettingsSchema schema();
+
+/// Settings that belong to one computer (window positions, the last folder used), so
+/// "Export settings" leaves them out.
+QStringList notExportedKeys();
+
+/// Settings a support file leaves out because they are private or meaningless to others:
+/// other people's names (per-user volumes), folders, the local server's admin name and
+/// window positions.
+QStringList privateKeys();
 
 } // namespace opentalk::storage::client

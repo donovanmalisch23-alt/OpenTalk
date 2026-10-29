@@ -4,8 +4,18 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.0.0-rc.1] - 2026-10-29
+
+The first published version: a release candidate for 1.0.0, with everything built in Phases 0 to 9. It has not yet been tried with NVDA or with real sound hardware; see the [release notes](docs/release-notes/1.0.0-rc.1.md).
+
 ### Added
 
+- Status messages: Server, "Set my status message" (Ctrl+Shift+S) shows a short note after your name for everyone (protocol `SetStatus`, `UserUpdated` and user field 6; SDK `Client::setStatus()` and `User::status`). Refused while text-muted; shares the chat flood limit.
+- Help, "Create a support file": shows, then saves or copies, the version, system, sound devices, plugins, settings and end of the log, leaving out passwords, messages, server addresses, other people's names and personal folders.
+- File, "Export settings" and "Import settings", for moving settings to another computer. The previous settings are kept before an import.
+- Only one copy of OpenTalk can use a data folder at a time; starting a second one explains how to switch or use `--data-dir`. After a crash, the next start says so in the history and how to report it.
 - Windows installer (per user, no administrator rights), next to the portable zip. Uninstalling keeps your settings.
 - "Remember my password" in the connect dialog, kept in Windows Credential Manager only, and only after the server accepted it.
 - Help, Third-party notices; the package now contains THIRD-PARTY-NOTICES.txt and every bundled licence. About shows the Qt and OpenSSL versions.
@@ -48,6 +58,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ### Fixed
 
+- A damaged FLAC file could make OpenTalk read outside a buffer when seeking (found by fuzzing in miniaudio's FLAC decoder). The vendored miniaudio carries a small patch, recorded in the third-party register.
 - The fuzz build now instruments the libraries under test, not only the fuzz harnesses.
 - Restoring a backup twice in the same second could overwrite the file being restored.
 
@@ -77,3 +88,6 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Logging with per-component categories and a runtime log level.
 - Protocol framing and version negotiation, with unit tests and a fuzz harness.
 - CI for Windows (build, tests, portable zip) and Linux (format check, tests, sanitizers, fuzzing).
+
+[Unreleased]: https://github.com/donovanmalisch23-alt/opentalk/compare/v1.0.0-rc.1...HEAD
+[1.0.0-rc.1]: https://github.com/donovanmalisch23-alt/opentalk/releases/tag/v1.0.0-rc.1

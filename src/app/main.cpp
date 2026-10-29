@@ -7,6 +7,7 @@
 #include "opentalk/security/Tls.h"
 #include "opentalk/storage/AppPaths.h"
 #include "opentalk/storage/ClientSettings.h"
+#include "opentalk/storage/DataFolderLock.h"
 #include "opentalk/storage/ServerProfiles.h"
 #include "opentalk/storage/SettingsStore.h"
 #include "opentalk/ui/MainWindow.h"
@@ -58,11 +59,28 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // One copy of OpenTalk per data folder: two would overwrite each other's settings and
+    // write to the same log. Checked before logging starts, for that reason.
+    storage::DataFolderLock dataFolderLock(paths.dataRoot());
+    const storage::DataFolderLock::Result lockResult = dataFolderLock.acquire();
+    if (lockResult == storage::DataFolderLock::Result::InUse) {
+        QMessageBox::information(nullptr, QStringLiteral("OpenTalk"),
+                                 QStringLiteral("OpenTalk is already running with this data folder:\n%1\n\n"
+                                                "Switch to its window (Alt+Tab). To run a second copy, start it with "
+                                                "--data-dir and another folder.")
+                                     .arg(QDir::toNativeSeparators(paths.dataRoot())));
+        return 0;
+    }
+
     // Start logging at the default level so problems while loading settings are recorded.
     logging::install({paths.clientLogFile(), logging::Level::Info, true});
     qCInfo(lcApp).noquote() << "OpenTalk" << QApplication::applicationVersion() << "starting; data folder"
                             << QDir::toNativeSeparators(paths.dataRoot()) << "(" << storage::toString(paths.mode())
                             << "mode)";
+    const bool exitedUnexpectedly = lockResult == storage::DataFolderLock::Result::AcquiredAfterUnexpectedExit;
+    if (exitedUnexpectedly) {
+        qCWarning(lcApp) << "OpenTalk did not exit normally the last time it ran";
+    }
 
     storage::SettingsStore settings(storage::client::schema(), paths.clientSettingsFile());
     const storage::LoadReport report = settings.load();
@@ -84,6 +102,9 @@ int main(int argc, char *argv[])
 
     ui::MainWindow window(settings, paths, profiles);
     window.show();
+    if (exitedUnexpectedly) {
+        window.noteUnexpectedExit();
+    }
     // Messages are shown after the window so focus returns to it when they are dismissed.
     QStringList warnings = report.warnings + profileWarnings;
     if (!tlsReady) {

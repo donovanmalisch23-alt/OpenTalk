@@ -79,6 +79,7 @@ A bot is an ordinary account and gets exactly the permissions of its role; being
 - Give it the smallest role that works. A moderation bot needs a moderator role; a greeter needs nothing special.
 - `User::bot` tells your bot which users are bots. **Never answer other bots automatically**, or two bots can keep each other talking.
 - Keep the password out of the command line (other users of the computer can see command lines). The example reads it from standard input.
+- A bot can show what it is doing with a status message: `client.setStatus("playing the news")` (up to 100 characters, empty clears it; since 0.4). `User::status` and `userUpdated()` show other people's.
 
 ## Server identity
 

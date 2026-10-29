@@ -38,6 +38,7 @@ QCborMap toCbor(const ServerSettingsResult &m);
 QCborMap toCbor(const GetServerStats &m);
 QCborMap toCbor(const ServerStatsResult &m);
 QCborMap toCbor(const TransferOwnership &m);
+QCborMap toCbor(const SetStatus &m);
 
 namespace detail {
 

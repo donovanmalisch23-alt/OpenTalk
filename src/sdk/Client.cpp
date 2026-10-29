@@ -206,6 +206,7 @@ User toSdk(const protocol::UserInfo &u, const client::ClientState &state)
     user.bot = (u.flags & protocol::BotFlag) != 0;
     user.voiceMuted = (u.flags & protocol::VoiceMutedFlag) != 0;
     user.textMuted = (u.flags & protocol::TextMutedFlag) != 0;
+    user.status = u.status;
     return user;
 }
 
@@ -392,6 +393,14 @@ quint64 Client::sendDirectMessage(quint32 userId, const QString &text)
 quint64 Client::sendServerMessage(const QString &text)
 {
     return d->connection.sendText(protocol::TextTarget::Server, 0, text);
+}
+
+quint64 Client::setStatus(const QString &status)
+{
+    if (status.size() > protocol::kMaxStatusLength) {
+        return 0;
+    }
+    return d->connection.sendRequest(protocol::SetStatus{0, status});
 }
 
 bool Client::isAudioReady() const

@@ -200,6 +200,11 @@ private slots:
         QVERIFY(h->core->voiceRecipients(2).isEmpty());
         h->send(2, SendText{2, TextTarget::Channel, kRootChannelId, QStringLiteral("let me talk")});
         QVERIFY(h->answer(2, 2) == std::optional<ErrorCode>(ErrorCode::Muted));
+        // A status is shown to everyone too, so a text mute blocks it (clearing is still allowed).
+        h->send(2, SetStatus{20, QStringLiteral("look at me")});
+        QVERIFY(h->answer(2, 20) == std::optional<ErrorCode>(ErrorCode::Muted));
+        h->send(2, SetStatus{21, QString()});
+        QCOMPARE(h->answer(2, 21), std::optional<ErrorCode>());
         const auto update = h->last<UserUpdated>(3);
         QVERIFY(update && update->userId == 2 && (update->flags & VoiceMutedFlag) && (update->flags & TextMutedFlag));
         // Lifting it early restores everything.

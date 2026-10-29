@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # GitHub CodeQL security analysis of the C++ code. Results appear under the repository's
-# Security tab, Code scanning.
+# Security tab, Code scanning, and are also listed in this job's log.
+#
+# Only OpenTalk's own code is reported. Code in third_party/ (miniaudio) and files Qt
+# generates in the build folder are compiled, so CodeQL analyses them too, but their
+# findings are removed before upload: they are not actionable here. miniaudio's decoders
+# are fuzzed instead (tests/fuzz), and its findings are tracked in the third-party register.
 name: CodeQL
 
 on:
@@ -41,4 +46,28 @@ jobs:
 
       - uses: github/codeql-action/analyze@v3
         with:
+          category: "/language:c-cpp"
+          upload: never
+          output: sarif-results
+
+      - name: Leave out third-party and generated code, and list the findings
+        run: |
+          mkdir -p filtered
+          for f in sarif-results/*.sarif; do
+            jq '(.runs[].results) |= map(select(
+                  (.locations[0].physicalLocation.artifactLocation.uri // "")
+                  | test("^(third_party/|build/)") | not))' "$f" > "filtered/$(basename "$f")"
+            echo "Findings in OpenTalk's code ($(basename "$f")), highest security severity first:"
+            jq -r '.runs[] | ([.tool.driver.rules[]?, .tool.extensions[]?.rules[]?]
+                     | map({key: .id, value: (.properties["security-severity"] // "-")}) | from_entries) as $sev
+                   | .results[]
+                   | [($sev[.ruleId] // "-"), (.level // "warning"), .ruleId,
+                      "\(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine)",
+                      (.message.text | gsub("\n"; " ") | .[0:200])] | @tsv' "filtered/$(basename "$f")" \
+              | sort -t "$(printf '\t')" -k1,1 -g -r
+          done
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: filtered
           category: "/language:c-cpp"

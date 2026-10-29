@@ -6,7 +6,8 @@
 ; application data folder and are kept when OpenTalk is uninstalled.
 ;
 ; Build (CI does this after packaging the portable folder):
-;   makensis /DVERSION=0.1.0 /DSOURCE=<portable folder> /DOUTFILE=<setup.exe> opentalk.nsi
+;   makensis /DVERSION=1.0.0 /DDISPLAY_VERSION=1.0.0-rc.1 /DSOURCE=<portable folder> /DOUTFILE=<setup.exe> opentalk.nsi
+; VERSION is numeric (Windows file versions need it); DISPLAY_VERSION is what people see.
 
 Unicode true
 !include "MUI2.nsh"
@@ -14,16 +15,19 @@ Unicode true
 !ifndef VERSION
   !error "Pass /DVERSION=<x.y.z>"
 !endif
+!ifndef DISPLAY_VERSION
+  !define DISPLAY_VERSION "${VERSION}"
+!endif
 !ifndef SOURCE
   !error "Pass /DSOURCE=<folder with the packaged files>"
 !endif
 !ifndef OUTFILE
-  !define OUTFILE "OpenTalk-${VERSION}-setup-x64.exe"
+  !define OUTFILE "OpenTalk-${DISPLAY_VERSION}-setup-x64.exe"
 !endif
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenTalk"
 !define UNINSTALLER "Uninstall OpenTalk.exe"
 
-Name "OpenTalk ${VERSION}"
+Name "OpenTalk ${DISPLAY_VERSION}"
 OutFile "${OUTFILE}"
 RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\Programs\OpenTalk"
@@ -33,14 +37,14 @@ ManifestDPIAware true
 
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "OpenTalk"
-VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${DISPLAY_VERSION}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "OpenTalk installer"
 VIAddVersionKey "CompanyName" "The OpenTalk contributors"
 VIAddVersionKey "LegalCopyright" "GNU General Public License version 3"
 
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TEXT "This installs OpenTalk ${VERSION}, an accessible voice and text chat program, for you only. No administrator rights are needed.$\r$\n$\r$\nTo use OpenTalk from a USB stick or a folder without installing, download the portable zip instead."
+!define MUI_WELCOMEPAGE_TEXT "This installs OpenTalk ${DISPLAY_VERSION}, an accessible voice and text chat program, for you only. No administrator rights are needed.$\r$\n$\r$\nTo use OpenTalk from a USB stick or a folder without installing, download the portable zip instead."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\OpenTalk.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Start OpenTalk now"
 !define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\README.md"
@@ -70,7 +74,7 @@ Section "OpenTalk" SectionMain
 
   WriteRegStr HKCU "Software\OpenTalk" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "OpenTalk"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${DISPLAY_VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "The OpenTalk contributors"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\OpenTalk.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"

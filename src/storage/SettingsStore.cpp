@@ -159,6 +159,98 @@ LoadReport SettingsStore::load()
     return report;
 }
 
+bool SettingsStore::exportTo(const QString &path, const QStringList &excludedKeys, QString *errorMessage) const
+{
+    QJsonObject values;
+    for (const SettingDefinition &definition : m_schema.definitions()) {
+        if (!excludedKeys.contains(definition.key)) {
+            values.insert(definition.key, m_schema.toJson(definition.key, value(definition.key)));
+        }
+    }
+    QJsonObject root;
+    root.insert(kFormatKey, kFormatName);
+    root.insert(kVersionKey, m_schema.version());
+    root.insert(kValuesKey, values);
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = file.errorString();
+        }
+        return false;
+    }
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (!file.commit()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = file.errorString();
+        }
+        return false;
+    }
+    return true;
+}
+
+ImportReport SettingsStore::importFrom(const QString &path, const QStringList &excludedKeys)
+{
+    ImportReport report;
+    auto refuse = [&report](const QString &error) {
+        report.error = error;
+        return report;
+    };
+    if (m_readOnly) {
+        return refuse(QStringLiteral("the settings cannot be changed in this session"));
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return refuse(file.errorString());
+    }
+    if (file.size() > kMaxSettingsFileBytes) {
+        return refuse(QStringLiteral("the file is too large to be a settings file"));
+    }
+    QJsonParseError parseError{};
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    const QJsonObject root = document.object();
+    if (parseError.error != QJsonParseError::NoError || !document.isObject() ||
+        root.value(kFormatKey).toString() != kFormatName || !root.value(kVersionKey).isDouble() ||
+        !root.value(kValuesKey).isObject()) {
+        return refuse(QStringLiteral("it is not an OpenTalk settings file"));
+    }
+    const int fileVersion = root.value(kVersionKey).toInt();
+    if (fileVersion > m_schema.version()) {
+        return refuse(QStringLiteral("it was written by a newer version of OpenTalk"));
+    }
+    QJsonObject values = root.value(kValuesKey).toObject();
+    for (int version = fileVersion; version < m_schema.version(); ++version) {
+        const auto migration = m_migrations.constFind(version);
+        QString error;
+        if (migration == m_migrations.constEnd() || !(*migration)(values, error)) {
+            return refuse(QStringLiteral("it uses an old format that cannot be upgraded"));
+        }
+    }
+
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+        if (excludedKeys.contains(it.key())) {
+            report.skipped.append(QStringLiteral("%1: belongs to the other computer").arg(it.key()));
+            continue;
+        }
+        if (m_schema.find(it.key()) == nullptr) {
+            report.skipped.append(QStringLiteral("%1: not known to this version").arg(it.key()));
+            continue;
+        }
+        const std::optional<QVariant> imported = m_schema.fromJson(it.key(), it.value());
+        if (!imported || !m_schema.isValid(it.key(), *imported)) {
+            report.skipped.append(QStringLiteral("%1: the value is not valid").arg(it.key()));
+            continue;
+        }
+        if (value(it.key()) != *imported) {
+            setValue(it.key(), *imported);
+            ++report.changed;
+        }
+    }
+    report.ok = true;
+    qCInfo(lcStorage) << "Imported settings from a file:" << report.changed << "changed," << report.skipped.size()
+                      << "skipped";
+    return report;
+}
+
 bool SettingsStore::save(QString *errorMessage)
 {
     auto setError = [errorMessage](const QString &message) {

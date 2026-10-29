@@ -74,4 +74,14 @@ SettingsSchema schema()
     return s;
 }
 
+QStringList notExportedKeys()
+{
+    return {kMainWindowGeometry, kMainSplitterState, kMediaFolder};
+}
+
+QStringList privateKeys()
+{
+    return {kMainWindowGeometry, kMainSplitterState, kMediaFolder, kUserVolumes, kLocalServerAdminName};
+}
+
 } // namespace opentalk::storage::client

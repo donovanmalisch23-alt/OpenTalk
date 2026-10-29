@@ -228,6 +228,93 @@ private slots:
         QVERIFY(report.warnings.join(QLatin1Char(' ')).contains(QStringLiteral("cannot convert")));
         QCOMPARE(readFile(path()), original);
     }
+
+    void exportedSettingsCanBeImportedElsewhere()
+    {
+        SettingsStore source(testSchema(), path());
+        source.load();
+        QVERIFY(source.setValue(QStringLiteral("a/flag"), true));
+        QVERIFY(source.setValue(QStringLiteral("a/count"), 7));
+        QVERIFY(source.setValue(QStringLiteral("a/blob"), QByteArray("window")));
+        const QString exported = m_dir.filePath(QStringLiteral("exported.json"));
+        QString error;
+        QVERIFY2(source.exportTo(exported, {QStringLiteral("a/blob")}, &error), qPrintable(error));
+        const QJsonObject values =
+            QJsonDocument::fromJson(readFile(exported)).object().value(QStringLiteral("values")).toObject();
+        QVERIFY(!values.contains(QStringLiteral("a/blob")));                                    // left out
+        QCOMPARE(values.value(QStringLiteral("a/name")).toString(), QStringLiteral("default")); // defaults too
+
+        SettingsStore other(testSchema(), m_dir.filePath(QStringLiteral("other.json")));
+        other.load();
+        QVERIFY(other.setValue(QStringLiteral("a/name"), QStringLiteral("mine")));
+        QSignalSpy changed(&other, &SettingsStore::valueChanged);
+        const ImportReport report = other.importFrom(exported, {});
+        QVERIFY2(report.ok, qPrintable(report.error));
+        QCOMPARE(report.changed, 3); // flag, count, and name back to "default"
+        QCOMPARE(changed.size(), 3);
+        QCOMPARE(other.value(QStringLiteral("a/flag")), QVariant(true));
+        QCOMPARE(other.value(QStringLiteral("a/count")), QVariant(7));
+        QCOMPARE(other.value(QStringLiteral("a/name")), QVariant(QStringLiteral("default")));
+        QVERIFY(report.skipped.isEmpty());
+        QVERIFY(!QFile::exists(other.filePath())); // importing does not save by itself
+    }
+
+    void importSkipsWhatDoesNotFit()
+    {
+        const QString file = m_dir.filePath(QStringLiteral("import.json"));
+        writeFile(file, settingsJson(2, {{QStringLiteral("a/count"), 99},
+                                         {QStringLiteral("a/flag"), true},
+                                         {QStringLiteral("a/name"), QStringLiteral("x")},
+                                         {QStringLiteral("z/unknown"), 1}}));
+        SettingsStore store(testSchema(), path());
+        store.load();
+        const ImportReport report = store.importFrom(file, {QStringLiteral("a/name")});
+        QVERIFY(report.ok);
+        QCOMPARE(report.changed, 1);
+        QCOMPARE(store.value(QStringLiteral("a/count")), QVariant(5)); // 99 is out of range
+        QCOMPARE(store.value(QStringLiteral("a/name")), QVariant(QStringLiteral("default")));
+        const QString skipped = report.skipped.join(QLatin1Char('\n'));
+        QVERIFY(skipped.contains(QStringLiteral("a/count: the value is not valid")));
+        QVERIFY(skipped.contains(QStringLiteral("a/name: belongs to the other computer")));
+        QVERIFY(skipped.contains(QStringLiteral("z/unknown: not known to this version")));
+    }
+
+    void importRefusesFilesItCannotUse()
+    {
+        SettingsStore store(testSchema(), path());
+        store.load();
+        const QString file = m_dir.filePath(QStringLiteral("import.json"));
+        QVERIFY(!store.importFrom(m_dir.filePath(QStringLiteral("missing.json")), {}).ok);
+        writeFile(file, "{\"not\": \"settings\"}");
+        QCOMPARE(store.importFrom(file, {}).error, QStringLiteral("it is not an OpenTalk settings file"));
+        writeFile(file, settingsJson(3, {{QStringLiteral("a/flag"), true}}));
+        QCOMPARE(store.importFrom(file, {}).error, QStringLiteral("it was written by a newer version of OpenTalk"));
+        QCOMPARE(store.value(QStringLiteral("a/flag")), QVariant(false));
+
+        // An older file is upgraded the same way as when loading.
+        writeFile(file, settingsJson(1, {{QStringLiteral("old/count"), 3}}));
+        store.addMigration(1, [](QJsonObject &values, QString &) {
+            values.insert(QStringLiteral("a/count"), values.take(QStringLiteral("old/count")));
+            return true;
+        });
+        const ImportReport report = store.importFrom(file, {});
+        QVERIFY(report.ok);
+        QCOMPARE(store.value(QStringLiteral("a/count")), QVariant(3));
+    }
+
+    void clientSettingsLeaveOutWhatBelongsToOneComputer()
+    {
+        const QStringList notExported = client::notExportedKeys();
+        QVERIFY(notExported.contains(client::kMainWindowGeometry));
+        QVERIFY(notExported.contains(client::kMediaFolder));
+        QVERIFY(!notExported.contains(client::kPushToTalkKey));
+        const QStringList privateKeys = client::privateKeys();
+        QVERIFY(privateKeys.contains(client::kUserVolumes));
+        QVERIFY(privateKeys.contains(client::kLocalServerAdminName));
+        for (const QString &key : privateKeys + notExported) {
+            QVERIFY2(client::schema().find(key) != nullptr, qPrintable(key));
+        }
+    }
 };
 
 QTEST_GUILESS_MAIN(TestSettingsStore)

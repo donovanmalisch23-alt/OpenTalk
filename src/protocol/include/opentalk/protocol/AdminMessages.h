@@ -131,12 +131,22 @@ struct ServerStatsInfo {
 
 // ------------------------------------------------------------------ server to client
 
-/// A user's role, name or flags changed (for example a mute).
+/// A user's role, flags (for example a mute) or status message changed. Always carries
+/// the complete current values.
 struct UserUpdated {
     quint32 userId = 0;
     quint32 roleId = 0;
     quint32 flags = 0; ///< UserFlag bits
+    QString status;    ///< The user's status message; empty when none.
     friend bool operator==(const UserUpdated &, const UserUpdated &) = default;
+};
+
+/// Request: set your own status message, shown to everyone next to your name (for
+/// example "back at 5"). Empty clears it. Answered by RequestDone or Error.
+struct SetStatus {
+    quint64 requestId = 0;
+    QString status; ///< Up to kMaxStatusLength characters, no control characters.
+    friend bool operator==(const SetStatus &, const SetStatus &) = default;
 };
 
 /// The server's roles changed; replaces the client's list.

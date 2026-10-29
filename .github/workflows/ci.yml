@@ -4,6 +4,8 @@ name: CI
 on:
   push:
     branches: ["**"]
+    # A version tag (v1.0.0-rc.1) also publishes a GitHub release: see the release job.
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -96,7 +98,9 @@ jobs:
           New-Item -ItemType Directory -Force "$stage/examples/plugins/dice" | Out-Null
           Copy-Item "$dice/opentalk-dice-plugin.exe", "$dice/plugin.json" "$stage/examples/plugins/dice/"
           Copy-Item -Recurse examples/plugins/hello-python "$stage/examples/plugins/hello-python"
-          New-Item -ItemType File "$stage/OpenTalk.portable" | Out-Null
+          # Any content works; the text explains the file to someone who finds it.
+          Set-Content -Path "$stage/OpenTalk.portable" -Value ("This file makes OpenTalk keep its settings and logs in the " +
+            "data folder next to it (portable mode). Delete it to keep them in your Windows user profile instead.")
           Copy-Item LICENSE "$stage/LICENSE.txt"
           Copy-Item README.md "$stage/README.md"
           # Licence notices for everything bundled: Qt and the code inside it, and the
@@ -164,10 +168,13 @@ jobs:
             choco install nsis -y --no-progress
             if ($LASTEXITCODE -ne 0) { throw "could not install NSIS" }
           }
-          $version = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'VERSION (\d+\.\d+\.\d+)').Groups[1].Value
-          $setup = "$PWD\OpenTalk-$version-setup-x64.exe"
-          & $makensis /V2 "/DVERSION=$version" "/DSOURCE=$((Resolve-Path OpenTalk-portable).Path)" "/DOUTFILE=$setup" `
-            packaging/windows/opentalk.nsi
+          $cmake = Get-Content CMakeLists.txt -Raw
+          $version = [regex]::Match($cmake, 'VERSION (\d+\.\d+\.\d+)').Groups[1].Value
+          $label = [regex]::Match($cmake, 'set\(OPENTALK_VERSION_LABEL "([^"]*)"\)').Groups[1].Value
+          $display = if ($label) { "$version-$label" } else { $version }
+          $setup = "$PWD\OpenTalk-$display-setup-x64.exe"
+          & $makensis /V2 "/DVERSION=$version" "/DDISPLAY_VERSION=$display" "/DSOURCE=$((Resolve-Path OpenTalk-portable).Path)" `
+            "/DOUTFILE=$setup" packaging/windows/opentalk.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
           # Silent per-user install into a test folder, as a person without administrator rights would.
           $dir = "$env:RUNNER_TEMP\OpenTalk-installed"
@@ -178,11 +185,12 @@ jobs:
           }
           if (Test-Path "$dir\OpenTalk.portable") { throw "the installed copy must not be in portable mode" }
           $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenTalk"
-          if ((Get-ItemProperty $key).DisplayVersion -ne $version) { throw "the uninstall entry is missing" }
+          if ((Get-ItemProperty $key).DisplayVersion -ne $display) { throw "the uninstall entry is missing" }
           # The installed programs run with only Windows on PATH.
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-          & "$dir\opentalk-server.exe" --version
+          $reported = & "$dir\opentalk-server.exe" --version
           if ($LASTEXITCODE -ne 0) { throw "the installed server does not start" }
+          if (-not ($reported -match [regex]::Escape($display))) { throw "the server reports '$reported', not $display" }
           # Uninstall (in place, so this waits for it) removes the program but leaves other files alone.
           New-Item -ItemType File "$dir\keep-me.txt" | Out-Null
           Start-Process -FilePath "$dir\Uninstall OpenTalk.exe" -ArgumentList "/S", "_?=$dir" -Wait
@@ -252,13 +260,21 @@ jobs:
 
       - name: Run each fuzzer for 1 minute
         run: |
+          mkdir -p artifacts
           for target in frame_decoder message_decoder session server_core voice_router media_decoder; do
             mkdir -p "corpus/$target"
             if [ -d "tests/fuzz/seeds/$target" ]; then cp tests/fuzz/seeds/$target/* "corpus/$target/"; fi
             echo "::group::fuzz_$target"
-            "build/linux-fuzz/tests/fuzz/fuzz_$target" -max_total_time=60 "corpus/$target"
+            "build/linux-fuzz/tests/fuzz/fuzz_$target" -max_total_time=60 -artifact_prefix="artifacts/$target-" "corpus/$target"
             echo "::endgroup::"
           done
+
+      - name: Keep crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: artifacts
 
   docker:
     name: Server container image
@@ -281,3 +297,71 @@ jobs:
           docker stop ot
           test "$(docker inspect ot --format '{{.State.ExitCode}}')" = 0
           docker logs ot 2>&1 | tail -1 | grep Stopped
+
+  # Runs only for a version tag (for example v1.0.0-rc.1), after every other job passed:
+  # publishes the portable zip and the installer that the windows job built and tested,
+  # with checksums, build provenance and the release notes from docs/release-notes.
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, fuzz, docker]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the portable build
+        uses: actions/download-artifact@v4
+        with:
+          name: OpenTalk-portable-windows-x64
+          path: dist/portable
+
+      - name: Download the installer
+        uses: actions/download-artifact@v4
+        with:
+          name: OpenTalk-setup-windows-x64
+          path: dist/setup
+
+      - name: Check the version and name the files
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          numeric=$(sed -n 's/^    VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt)
+          label=$(sed -n 's/^set(OPENTALK_VERSION_LABEL "\(.*\)")$/\1/p' CMakeLists.txt)
+          expected="${numeric}${label:+-$label}"
+          if [ "$version" != "$expected" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the version in CMakeLists.txt ($expected)"
+            exit 1
+          fi
+          notes="docs/release-notes/$version.md"
+          test -f "$notes" || { echo "::error::$notes is missing"; exit 1; }
+          test -f dist/portable/OpenTalk.exe || { echo "::error::the portable build has no OpenTalk.exe"; exit 1; }
+          test -s dist/portable/OpenTalk.portable || { echo "::error::the portable marker is missing"; exit 1; }
+          mkdir -p upload
+          # A top-level folder, so "Extract all" gives one tidy folder.
+          mv dist/portable "dist/OpenTalk-$version"
+          (cd dist && zip -r -9 -q "../upload/OpenTalk-$version-portable-windows-x64.zip" "OpenTalk-$version")
+          mv dist/setup/OpenTalk-*-setup-x64.exe "upload/OpenTalk-$version-setup-x64.exe"
+          (cd upload && sha256sum OpenTalk-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "NOTES=$notes" >> "$GITHUB_ENV"
+
+      - name: Record build provenance
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: |
+            upload/OpenTalk-*.zip
+            upload/OpenTalk-*.exe
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag $prerelease \
+            --title "OpenTalk $VERSION" --notes-file "$NOTES" \
+            upload/OpenTalk-*.zip upload/OpenTalk-*.exe upload/SHA256SUMS.txt

@@ -351,6 +351,7 @@ bool isAdminType(MessageType type)
     case MessageType::GetServerStats:
     case MessageType::ServerStatsResult:
     case MessageType::TransferOwnership:
+    case MessageType::SetStatus:
         return true;
     default:
         return false;
@@ -364,7 +365,9 @@ Message decodeAdmin(MessageType type, FieldReader &r)
     switch (type) {
     case MessageType::UserUpdated:
         return UserUpdated{r.integer<quint32>(1, "userId"), r.integer<quint32>(2, "roleId"),
-                           r.integer<quint32>(3, "flags")};
+                           r.integer<quint32>(3, "flags"), r.plainText(4, "status", kMaxStatusLength, false)};
+    case MessageType::SetStatus:
+        return SetStatus{requestId(), r.plainText(2, "status", kMaxStatusLength, false)};
     case MessageType::RolesChanged: {
         RolesChanged m;
         m.roles =
@@ -587,7 +590,12 @@ Message decodeAdmin(MessageType type, FieldReader &r)
 
 QCborMap toCbor(const UserUpdated &m)
 {
-    return {{1, static_cast<qint64>(m.userId)}, {2, static_cast<qint64>(m.roleId)}, {3, static_cast<qint64>(m.flags)}};
+    QCborMap map{
+        {1, static_cast<qint64>(m.userId)}, {2, static_cast<qint64>(m.roleId)}, {3, static_cast<qint64>(m.flags)}};
+    if (!m.status.isEmpty()) {
+        map.insert(4, m.status);
+    }
+    return map;
 }
 
 QCborMap toCbor(const RolesChanged &m)
@@ -779,6 +787,15 @@ QCborMap toCbor(const ServerStatsResult &m)
 QCborMap toCbor(const TransferOwnership &m)
 {
     return {{kRequestId, u64(m.requestId)}, {2, m.account}};
+}
+
+QCborMap toCbor(const SetStatus &m)
+{
+    QCborMap map{{kRequestId, u64(m.requestId)}};
+    if (!m.status.isEmpty()) {
+        map.insert(2, m.status);
+    }
+    return map;
 }
 
 } // namespace opentalk::protocol

@@ -191,6 +191,8 @@ void ServerCore::handleMessage(quint32 sessionId, const Message &message)
         editChannel(client, *edit);
     } else if (const auto *text = std::get_if<SendText>(&message)) {
         sendText(client, *text);
+    } else if (const auto *status = std::get_if<SetStatus>(&message)) {
+        setStatus(client, *status);
     } else if (std::holds_alternative<Error>(message)) {
         // Informational; nothing to do.
     } else if (!handleAdminMessage(client, message)) {
@@ -370,7 +372,7 @@ void ServerCore::goOnline(Client &client, const QString &name, Role role, qint64
     client.state = ClientState::Online;
     client.accountId = accountId;
     client.bot = bot;
-    client.user = UserInfo{client.id, name, role, kRootChannelId, bot ? quint32{BotFlag} : 0u};
+    client.user = UserInfo{client.id, name, role, kRootChannelId, bot ? quint32{BotFlag} : 0u, QString()};
     client.effectiveRole = static_cast<moderation::RoleId>(role);
     m_channels[kRootChannelId].members.insert(client.id);
     qCInfo(lcServer).noquote() << "Session" << client.id << "logged in as" << name << "(" << toString(role) << ")";
@@ -787,7 +789,7 @@ void ServerCore::removeIfEmptyTemporary(quint32 channelId)
 
 // ---------------------------------------------------------------------------- text
 
-void ServerCore::sendText(Client &client, const SendText &request)
+bool ServerCore::takeTextToken(Client &client)
 {
     const qint64 now = m_now();
     client.textTokens =
@@ -795,10 +797,38 @@ void ServerCore::sendText(Client &client, const SendText &request)
                  client.textTokens + static_cast<double>(now - client.textRefillMs) / 1000.0 * m_config.textPerSecond);
     client.textRefillMs = now;
     if (client.textTokens < 1.0) {
+        return false;
+    }
+    client.textTokens -= 1.0;
+    return true;
+}
+
+void ServerCore::setStatus(Client &client, const SetStatus &request)
+{
+    const QString status = request.status.trimmed();
+    // A status is shown to everyone, like a message, so it obeys text mutes and the flood limit.
+    if (!status.isEmpty() &&
+        m_sanctions.isTextMuted(subjectOf(client), chainOf(client.user.channelId), m_wallClock())) {
+        refuse(client.id, request.requestId, ErrorCode::Muted, QStringLiteral("you are muted"));
+        return;
+    }
+    if (!takeTextToken(client)) {
         refuse(client.id, request.requestId, ErrorCode::RateLimited, QStringLiteral("you are sending too fast"));
         return;
     }
-    client.textTokens -= 1.0;
+    reply(client.id, request.requestId);
+    if (status != client.user.status) {
+        client.user.status = status;
+        broadcast(UserUpdated{client.id, static_cast<quint32>(client.user.role), client.user.flags, status});
+    }
+}
+
+void ServerCore::sendText(Client &client, const SendText &request)
+{
+    if (!takeTextToken(client)) {
+        refuse(client.id, request.requestId, ErrorCode::RateLimited, QStringLiteral("you are sending too fast"));
+        return;
+    }
 
     const quint32 here = client.user.channelId;
     if (m_sanctions.isTextMuted(subjectOf(client), chainOf(here), m_wallClock())) {
