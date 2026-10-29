@@ -17,6 +17,7 @@ enum class SettingType {
     Int,       ///< JSON integer number
     String,    ///< JSON string
     ByteArray, ///< JSON string holding base64 (used for opaque window state)
+    IntMap,    ///< JSON object of integers, as a QVariantMap of int (for example per-user volumes)
 };
 
 /// Describes one persisted setting: its key, type, default and validation rule.

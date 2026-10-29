@@ -13,6 +13,7 @@ struct VersionRange {
     quint16 maximum = 0;
 
     bool isValid() const { return minimum != 0 && minimum <= maximum; }
+    friend bool operator==(const VersionRange &, const VersionRange &) = default;
 };
 
 /// Versions this build implements. Version 1 is the first (still provisional) protocol.

@@ -1,6 +1,6 @@
 # Moderation and permissions model
 
-**Status:** Designed (Phase 5). This is a pure-logic component (`src/moderation`) that the server calls for every decision, so it can be tested exhaustively without networking.
+**Status:** implemented (Phase 5) and tested, with the exceptions listed under [Not yet implemented](#not-yet-implemented). The rules live in a pure-logic library (`src/moderation`) that the server calls for every decision, so they are tested without networking (`tst_moderation`), across every request and role (`tst_authorization`, 182 cases), through the server (`tst_moderation_server`) and in the desktop app (`tst_moderation_ui`). The messages are in [protocol/moderation.md](../protocol/moderation.md); how to use it is in the [server administration guide](../server-administration/moderation.md).
 
 ## Identities
 
@@ -18,12 +18,14 @@ A **role** is a named set of capabilities. The default roles are listed below; o
 | Owner | Everything, including the non-delegable capabilities below |
 | Administrator | Server configuration, roles below Administrator, all moderation actions |
 | Moderator | Warn, mute, kick, temporary ban, read audit log, decide appeals |
-| Channel Moderator | Moderation inside the channels where it is assigned |
+| Channel Moderator | Moderation inside the channels where it is assigned. Not a built-in role: it is made with channel permission rules for an account or a role (see the [administration guide](../server-administration/moderation.md#channel-moderators)). |
 | Registered User | Join, talk, send text, create temporary channels |
 | Guest | Join and talk where allowed |
 | Restricted | Join only; cannot talk or send text |
 
-**Non-delegable owner capabilities:** transferring ownership, deleting the server's audit log, and changing who holds the Owner role. Nobody else can hold these, so an administrator cannot lock out the owner.
+**Non-delegable owner capabilities:** transferring ownership, deleting the server's audit log, and changing who holds the Owner role. Nobody else can hold these, so an administrator cannot lock out the owner. (The audit log cannot be deleted through OpenTalk at all; old entries are removed only by the retention period.)
+
+**Built-in ranks:** Owner 100, Administrator 90, Moderator 50, Registered user 10, Guest 5, Restricted 1. Custom roles take ranks from 2 to 89 and, when created by someone other than the owner, below the creator's own rank. A role can only grant capabilities its creator holds.
 
 **Role ranks:** every role has a rank. A user can act on, or assign roles to, only users and roles of **strictly lower** rank. This stops moderators sanctioning their peers or superiors.
 
@@ -32,12 +34,12 @@ A **role** is a named set of capabilities. The default roles are listed below; o
 For a user U, capability C and channel X:
 
 1. If U holds the Owner role, **allow**.
-2. Walk from X up through its parent channels to the server level. At each level, look at the rules for C that apply to U: rules for U's account, then rules for each of U's roles.
-3. At the **first level that has any matching rule**: if any matching rule is **Deny**, the result is **deny**; otherwise it is **allow**. Lower levels are not consulted.
+2. Walk from X up through its parent channels to the server level. At each level, first look at the rules for C that name U's account; if there are none, look at the rules for U's role.
+3. The **first set of matching rules** decides: if any of them is **Deny**, the result is **deny**; otherwise it is **allow**. Nothing further is consulted. (So "registered users may not talk in the Lobby, but alice may" works: the rule for alice's account is more specific than the rule for her role.)
 4. If no level has a rule, use the server-wide grants of U's roles (allow if any role grants C).
 5. Otherwise **deny**. The default is deny.
 
-So: the most specific level wins, deny beats allow at the same level, and everything is denied by default. The resolver can also return *why* a decision was made ("denied by rule on channel Lobby for role Guest"). Administrators can see that explanation in the UI.
+So: the most specific level wins, an account rule beats a role rule at the same level, deny beats allow among equally specific rules, and everything is denied by default. The resolver can also return *why* a decision was made ("denied by rule on channel Lobby for role Guest"). Administrators can see that explanation in the UI.
 
 ## Sanctions
 
@@ -59,7 +61,7 @@ Affected users are told the type, scope, duration and reason, unless a server po
 
 - Append-only. Each entry records the time, actor, action, target, scope, reason and result.
 - **Tamper-evident:** each entry stores a hash of the previous entry, and the server checks the chain on start-up. Someone with direct file access can rewrite the database. The hash chain shows that a change happened but cannot prevent it. That limit is documented. Owners can export the log for off-machine copies.
-- Readable with `audit.read`. Retention is configurable, with a documented default of 1 year.
+- Readable with `audit.read`. Retention is configurable (`--audit-retention-days`), with a default of 1 year; old entries are removed at start-up and once a day. The oldest remaining entry keeps the hash of the entry before it, so the rest of the chain can still be checked.
 
 ## Reports and appeals
 
@@ -73,3 +75,15 @@ Affected users are told the type, scope, duration and reason, unless a server po
 ## What OpenTalk cannot guarantee
 
 OpenTalk provides enforcement, transparency and accountability tools. It cannot make every server owner fair. Owners decide their own policies within these mechanisms.
+
+## Not yet implemented
+
+| Item | State |
+|---|---|
+| Mass-action safeguard | Not needed yet: every Phase 5 action affects one person. It will come with the first action that affects many (for example moving a whole channel). |
+| Bans on IP address **ranges** | Only exact addresses can be blocked. |
+| Reporting a single **message** | Reports are about a person; the reason can quote the message. |
+| Hiding the reason from the sanctioned person by policy | Not available; reasons are always shown. |
+| Bots marked as bots | Arrives with bots in Phase 6. |
+
+The client shows only the actions a person may use, from the capabilities the server sends (server-wide, plus those held only in some channels). That is a convenience: the server checks every request again, and a refusal names the capability and the rule that decided it, for example "user.kick: denied by a rule on channel 1000 for role Registered user".

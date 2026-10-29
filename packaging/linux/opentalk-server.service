@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# systemd unit for opentalk-server. See docs/server-administration/hosting.md.
+#
+#   sudo useradd --system --home-dir /var/lib/opentalk --shell /usr/sbin/nologin opentalk
+#   sudo install -m 755 opentalk-server opentalk-ping /usr/local/bin/
+#   sudo cp opentalk-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now opentalk-server
+#   journalctl -u opentalk-server        (start-up output, including the fingerprint)
+#
+# Add options (for example --allow-guests or --name) to ExecStart.
+
+[Unit]
+Description=OpenTalk voice and text server
+Documentation=https://github.com/donovanmalisch23-alt/opentalk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opentalk
+Group=opentalk
+ExecStart=/usr/local/bin/opentalk-server --data-dir /var/lib/opentalk
+# SIGTERM is a graceful shutdown: connected people are told the server is stopping.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=5
+
+# /var/lib/opentalk is created for the service and is the only place it may write.
+StateDirectory=opentalk
+StateDirectoryMode=0750
+UMask=0077
+
+# Hardening: the server needs the network and its data folder, nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

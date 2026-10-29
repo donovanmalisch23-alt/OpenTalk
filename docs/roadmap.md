@@ -2,13 +2,13 @@
 
 Each phase ends with an exit review against its definition of done. Milestone IDs (M1.1 and so on) are meant to become GitHub issues. Dependencies are listed explicitly; a phase can start before the previous one ends only where the dependencies allow.
 
-## Phase 0: Research and foundation (done, pending owner approval)
+## Phase 0: Research and foundation (done; approved by the owner on 2026-10-26)
 
 Deliverables: [project brief](project-brief.md), [risk assessment](risk-assessment.md), [architecture](architecture/overview.md) and ADRs, [dependencies](dependencies.md), [licensing](licensing/policy.md), [protocol proposal](protocol/proposal.md), [accessibility plan](accessibility/plan.md), [threat model](security/threat-model.md), [moderation model](security/moderation-model.md), this roadmap.
 
 **Exit:** the owner approves the architecture and answers the open decisions in [status.md](status.md#decisions-needed-from-the-project-owner).
 
-## Phase 1: Buildable, accessible application skeleton (mostly done)
+## Phase 1: Buildable, accessible application skeleton (done except the NVDA pass and icon)
 
 | ID | Milestone | Depends on | Status |
 |---|---|---|---|
@@ -22,53 +22,136 @@ Deliverables: [project brief](project-brief.md), [risk assessment](risk-assessme
 
 **Definition of done:** a clean checkout builds and passes tests on Windows CI; the portable zip starts; the NVDA script passes or its failures are filed as bugs.
 
-## Phase 2: Protocol and SDK foundation
+## Phase 2: Protocol and SDK foundation (done)
 
-| ID | Milestone | Depends on |
+| ID | Milestone | Status |
 |---|---|---|
-| M2.1 | CBOR message codec for session messages (Hello, Welcome, Error, Ping, Pong, Goodbye) with schema validation, fuzzed | Framing (done) |
-| M2.2 | Session state machine, shared by client and server, unit-tested over an in-memory transport | M2.1 |
-| M2.3 | TLS 1.3 transport (`QSslSocket`), test certificates, pinning logic | M2.2 |
-| M2.4 | Minimal headless `opentalk-server` and a client library that complete the handshake over localhost | M2.3 |
-| M2.5 | SDK public header draft with versioning policy | M2.4 |
-| M2.6 | Decide the Windows TLS backend (Schannel or OpenSSL) with evidence; ADR | M2.3 |
+| M2.1 | CBOR codec for session messages (Hello, Welcome, Error, Ping, Pong, Goodbye) with strict validation, fuzzed | Done |
+| M2.2 | Client and server session state machines, tested over an in-memory pipe with a fake clock | Done (22 tests) |
+| M2.3 | TLS 1.3 transport, test certificate, pinning logic | Done |
+| M2.4 | Headless `opentalk-server` and client `Connection` completing the handshake over localhost | Done; also tested as real processes |
+| M2.5 | SDK public header draft with versioning policy | Done: [SDK 0.1](sdk/README.md) and `opentalk-ping` |
+| M2.6 | Windows TLS backend decision | Done: [ADR 0007](architecture/decisions/0007-openssl-tls-backend.md), OpenSSL everywhere |
 
-**Exit:** an integration test starts the server, connects a client over TLS, negotiates the version, pings, and disconnects cleanly. Malformed and oversized input tests pass.
+**Exit criterion met:** an integration test starts the server, connects a client over TLS 1.3, negotiates the version, pings and disconnects cleanly. Malformed input, oversized frames, plaintext, TLS 1.2-only, silent, flooding and wrong-certificate clients are refused (`tst_tls_session`, `tst_session`). Three fuzzers cover the parsing and session code.
 
-## Phase 3: Minimal end-to-end communication
+## Phase 3: Minimal end-to-end communication (done, except the NVDA pass)
 
-Accounts with Argon2id (libsodium); authentication; the channel tree; join and leave; presence; channel and direct text messages; basic permissions (hard-coded roles); server profiles in the client; start and stop a local server from the GUI; reconnection; accessible errors and announcements (A-7, A-8); event sounds (an original soundpack).
+| ID | Milestone | Status |
+|---|---|---|
+| M3.1 | Dependencies: libsodium, OpenSSL (vcpkg, pinned) and Qt SQL | Done; Windows packages now ship OpenSSL 3.6.5 instead of the end-of-life 3.0 |
+| M3.2 | Server data folder, SQLite database with migrations, Argon2id accounts, account commands, automatic self-signed certificate | Done |
+| M3.3 | Protocol messages for login, channels, presence and text; `ServerCore` with fixed roles; `ClientState` | Done; 21 server rule tests, 76 codec cases, fuzzed |
+| M3.4 | Network wiring, request API, automatic reconnection, SDK 0.2 | Done; multi-client end-to-end tests including a server restart |
+| M3.5 | Desktop app: saved servers, trust prompt, channel tree, chat, private messages, announcements | Done; tested against a real server |
+| M3.6 | Host a server from the app; documentation | Done |
+| M3.7 | Manual NVDA pass of the [script](accessibility/nvda-test-script.md) (steps 19–30 are new) | **Open: needs the owner or a tester** |
 
-**Exit:** two or more clients on a LAN can log in, browse, join channels and chat. The integration and NVDA scripts pass.
+**Moved out of Phase 3:**
 
-## Phase 4: Audio
+- **Event sounds** move to **Phase 4**, so they use the new audio output path instead of a temporary one. Every event already has a history line, and most have an announcement.
+- **Remembering passwords** (Windows Credential Manager) moves to **Phase 8**. Today the app asks for the password on each connect and never stores it.
 
-Starts with a **spike**: compare miniaudio, Qt Multimedia and raw WASAPI for latency, dropouts and device hot-plug, and decide audio encryption (DTLS or AEAD) with an ADR. Then: capture, Opus, UDP transport, jitter buffer, playback and mixing, push-to-talk (global hotkey), voice activation, mute and deafen, volumes, device selection and recovery, TCP fallback, and a benchmark harness.
+**Exit criterion met (automated):** two or more clients on a server log in, browse channels, join, create and delete channels, and exchange channel and private messages. This is tested both with the client library and with the real main window. Remaining for full sign-off: the NVDA pass.
 
-**Exit:** several clients exchange clear voice, with measured latency, CPU and loss-tolerance numbers published alongside the test setup.
+## Phase 4: Audio (done, except checks that need sound hardware)
 
-## Phase 5: Administration and moderation
+| ID | Milestone | Status |
+|---|---|---|
+| M4.1 | Audio library decision and encryption decision | Done: miniaudio and Opus ([ADR 0009](architecture/decisions/0009-audio-io-miniaudio.md)); XChaCha20-Poly1305 with keys over TLS ([ADR 0008](architecture/decisions/0008-voice-encryption.md)). Qt Multimedia and raw WASAPI were compared on features, not built |
+| M4.2 | Audio engine: capture, Opus with FEC, adaptive jitter buffer, mixing, soft clipping, voice activation, mute, deafen, per-user volume, device recovery | Done; tested end to end with a synthetic device (`tst_audio_core`, `tst_audio_engine`) |
+| M4.3 | Encrypted UDP voice, forwarding by the server, automatic TCP fallback, flood limits | Done; `tst_packetcipher`, `tst_voicerouter`, `tst_voice_session`, `fuzz_voice_router` |
+| M4.4 | Desktop app: Audio and Sounds settings, push-to-talk key (global on Windows), Ctrl+T, Ctrl+M, Ctrl+Shift+M, talking indicators, per-user volume, event sounds, soundpacks | Done; `tst_pushtotalk`, `tst_mainwindow`, `tst_mainwindow_online` (the real window talking with another client) |
+| M4.5 | Benchmark harness and published numbers | Done: `opentalk-audio-bench` and [benchmarks](audio/benchmarks.md). The measurements led to two fixes: a shorter adaptive jitter buffer and `TCP_NODELAY` |
+| M4.6 | Latency, dropouts and hot-plug on real Windows sound hardware; NVDA steps 33–43 | **Open: needs a person with hardware** (`opentalk-audio-bench device-loopback` and the [NVDA script](accessibility/nvda-test-script.md)) |
 
-The moderation library (roles, ranks, resolution, sanctions, audit chain, reports, appeals); server configuration UI; monitoring; owner recovery; the authorization test matrix.
+**Exit criterion:** "several clients exchange clear voice, with measured latency, CPU and loss-tolerance numbers published alongside the test setup."
 
-**Exit:** every admin action is enforced by the server and tested against unauthorized roles; the audit chain is verified; the UI is accessible.
+- **Met in software:** several clients exchange voice through a real server in automated tests, which detect the transmitted tone at the far end.
+- **Numbers published:** CPU, jitter and loss tolerance, and network latency are in [benchmarks](audio/benchmarks.md), together with the test setup.
+- **Not yet measured:** device latency and listening quality on real hardware.
 
-## Phase 6: Plugins
+## Phase 5: Administration and moderation (done, except the NVDA pass)
 
-Manifest, plugin host process, IPC, capability grants and the consent UI, an example plugin, bot accounts, a plugin licensing policy (with legal review).
+| ID | Milestone | Status |
+|---|---|---|
+| M5.1 | Moderation library: capabilities, roles and ranks, rule resolution, sanctions, hash-chained audit, reports, appeals | Done; `tst_moderation` |
+| M5.2 | Database schema 2 with migration from Phase 3 (earliest administrator becomes owner), roles, rules, sanctions, reports, appeals, audit with pruning, settings | Done; `tst_serverdatabase` |
+| M5.3 | Protocol messages 0x0500–0x052B and the server rules behind them; sanctions enforced on login, join, talk and text | Done; `tst_messages`, `tst_moderation_server`, fuzzed |
+| M5.4 | Authorization matrix: every request against every role | Done; `tst_authorization` (182 cases) |
+| M5.5 | Owner recovery, audit verification and export, audit retention on the command line | Done; `tst_server_process` |
+| M5.6 | Desktop app: Moderation menu and context actions offered by capability, role and mute labels, sanction messages, kick and ban explanations, My sanctions and appeals, the Administration dialog (sanctions, reports, appeals, accounts, roles, channel permissions, audit log, settings, statistics) | Done; `tst_moderation_ui` (the real windows against a real server, including accessible names) |
+| M5.7 | Documentation: [protocol](protocol/moderation.md), [administration guide](server-administration/moderation.md), [user guide](user-guide/moderation.md), [NVDA steps 46–57](accessibility/nvda-test-script.md#moderation-phase-5) | Done |
+| M5.8 | Manual NVDA pass of steps 46–57 | **Open: needs the owner or a tester** |
 
-**Exit:** an independently built example plugin installs, runs, is disabled and is removed through the documented workflow.
+**Exit criterion:** "every admin action is enforced by the server and tested against unauthorized roles; the audit chain is verified; the UI is accessible."
+
+- **Enforced and tested:** every request is checked by the server and tested for each role (`tst_authorization`).
+- **Audit chain verified:** at start-up, on request and by `--verify-audit`; tampering is detected in tests.
+- **UI accessibility:** every control in the moderation dialogs has an accessible name (automated check); the manual NVDA pass is open.
+- **Found and fixed on the way:** a kicked or banned client used to treat the server's final error as a dropped connection and reconnect. The protocol now states that an error without a request ID ends the session, and the client keeps the server's reason.
+- **Not yet:** see the [moderation model](security/moderation-model.md#not-yet-implemented) (address ranges, reporting single messages, mass-action safeguard).
+
+## Phase 6: Plugins and bots (done, except legal review and the NVDA pass)
+
+| ID | Milestone | Status |
+|---|---|---|
+| M6.1 | Manifest format, plugin registry with consent records, one process per plugin with JSON-lines IPC and limits, capability enforcement ([ADR 0006](architecture/decisions/0006-plugin-isolation.md), [reference](plugins/ipc.md)) | Done; `tst_plugin_manifest`, `tst_plugins` |
+| M6.2 | Plugin manager, consent dialog, Plugins menu, notifications, `--no-plugins` | Done; `tst_plugin_ui` |
+| M6.3 | Example plugins: dice roller (C++), "who is here" (Python) | Done; both run in `tst_plugins`; the C++ one is packaged and smoke-tested on Windows |
+| M6.4 | Bot accounts (database schema 3, `--bot`, marking in lists and the audit log), SDK 0.3 with audio, example greeter bot | Done; `tst_moderation_server`, `tst_examples` |
+| M6.5 | [Developer guide](plugins/developer-guide.md), [user guide](user-guide/plugins.md), [licensing policy draft](plugins/licensing.md), NVDA steps 58–64 | Done |
+| M6.6 | Legal review of the plugin licensing policy | **Open: owner decision** |
+| M6.7 | Manual NVDA pass of steps 58–64 | **Open: needs the owner or a tester** |
+
+**Exit criterion:** "an independently built example plugin installs, runs, is disabled and is removed through the documented workflow." Met in automated tests: the dice plugin is built as its own program with no OpenTalk code, installed from its folder, turned on through the consent dialog, used from the Plugins menu, turned off and removed (`tst_plugins`, `tst_plugin_ui`). Remaining: the manual NVDA pass.
 
 ## Phase 7: Advanced audio and system-audio sharing
 
 Effects pipeline; media player plugin; per-process WASAPI loopback that excludes OpenTalk's own output; whole-device loopback with feedback warnings; a virtual-driver feasibility report, with cost, for an owner decision.
 
+**Done** ([ADR 0010](architecture/decisions/0010-voice-processing-media-and-system-audio.md)):
+
+- **Voice processing:** noise suppression (on by default), automatic gain and echo cancellation (speexdsp).
+- **Voice effects:** rumble filter, bass, treble and a voice changer, on the audio worker thread.
+- **Playing files into a channel** (WAV, FLAC, MP3), labelled as a file, with pause, skip and stop. This is a **built-in player rather than a plugin**: the plugin message channel cannot carry 50 audio frames a second. Bots get the same reader in SDK 0.4, and the example bot gained `!play`.
+- **Sharing computer audio:** per-process loopback that leaves OpenTalk out (Windows 11), and whole-device loopback with OpenTalk's own sound removed by echo cancellation plus an explicit warning (Windows 10).
+- **Listener controls:** files and computer audio from others can be muted separately from voices.
+- **A separate permission** (`media.transmit`) for files and computer audio.
+- **The [virtual-driver feasibility report](audio/virtual-driver-feasibility.md)** for the owner.
+
+**Exit criterion:** "a user can play a file into a channel and share computer audio without others hearing themselves, and both are clearly labelled for listeners." Met in automated tests with synthetic devices (`tst_audio_engine`, `tst_media_ui`). **Remaining:** listening checks on real Windows 10 and 11 hardware (NVDA script steps 65–74).
+
 ## Phase 8: Hosting, deployment and hardening
 
-Public-hosting guide, reachability self-test, certificate setup, installer (and portable build), backups and restore, static analysis and dependency scanning in CI, longer fuzzing, resource-exhaustion tests, a release signing decision.
+Public-hosting guide, reachability self-test, certificate setup, **packaged OpenSSL on a supported LTS series, with licence notices for all bundled libraries**, remembered passwords in Windows Credential Manager, installer (and portable build), backups and restore, static analysis and dependency scanning in CI, longer fuzzing, resource-exhaustion tests, a release signing decision.
+
+**Done:**
+
+- **Hosting:** the [hosting guide](server-administration/hosting.md) covers firewalls, systemd, Docker, certificates (self-signed or Let's Encrypt), backups and upgrades. `opentalk-ping --voice` is the reachability check, including UDP.
+- **Packages:** the Windows package carries OpenSSL 3.5.9 LTS from an overlay port, and licence notices for everything bundled, including the code inside Qt. CI fails on an unlisted DLL.
+- **Remembered passwords** in Windows Credential Manager.
+- **Installer:** a per-user NSIS installer next to the portable build, installed and uninstalled in CI.
+- **Server backups:** automatic daily backups, `--backup` and a verified `--restore`, and a lock so two servers never share a data folder.
+- **Server packaging:** a server-only build, a container image tested in CI, and a sandboxed systemd unit.
+- **Static analysis:** clang-tidy (clean) and CodeQL in CI.
+- **Fuzzing:** fully instrumented now (before, only the harnesses were), with a new audio-file fuzzer and 10 minutes per fuzzer every night.
+- **Resource tests:** the per-address connection cap, and 150 simultaneous clients.
+
+**Not done (owner decisions):** code signing ([options](development/release-signing.md)). Automated vulnerability alerts for C++ dependencies are not available from GitHub for vcpkg and system packages; the monthly review covers them.
 
 ## Phase 9: Release candidate
 
 Full regression; NVDA validation; upgrade testing; user, admin and plugin guides; third-party notices; release notes; the published acceptance checklist.
+
+**Done (1.0.0-rc.1):**
+
+- **Remaining requirement gaps:** status messages (F-PRES-1), a support file the user reviews (F-DIAG-1), settings export and import (F-CFG-1), one copy per data folder and a note after an unexpected exit.
+- **Release pipeline:** a version tag publishes the tested portable zip and installer, with checksums and build provenance ([how](development/releasing.md)).
+- **Release notes** and the [acceptance checklist](release-notes/1.0.0-rc.1-acceptance.md), which lists each requirement with its evidence and gaps.
+- **Regression:** all test programs on Windows and Linux, under AddressSanitizer, clang-tidy, CodeQL and fuzzing. Fuzzing found, and the project patched, an out-of-bounds read in miniaudio's FLAC seeking and a hang in its WAV reader.
+- **Upgrades:** settings and server databases from earlier development builds are upgraded automatically, with a backup first (`tst_settingsstore`, `tst_serverdatabase`).
+
+**Not done (needs a person with Windows):** the NVDA pass and tests with real sound hardware. These decide whether 1.0.0 follows or another release candidate.
 
 **Linux and macOS** are added only after Phase 4, once there is capacity for platform audio backends and Orca or VoiceOver testing. Linux CI already keeps the core code portable.

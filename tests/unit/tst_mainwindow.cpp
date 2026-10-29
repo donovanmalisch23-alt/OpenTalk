@@ -4,20 +4,29 @@
 
 #include "opentalk/storage/AppPaths.h"
 #include "opentalk/storage/ClientSettings.h"
+#include "opentalk/storage/ServerProfiles.h"
 #include "opentalk/storage/SettingsStore.h"
+#include "opentalk/ui/AudioController.h"
 #include "opentalk/ui/MainWindow.h"
 #include "opentalk/ui/SettingsDialog.h"
+#include "opentalk/ui/SupportFileDialog.h"
+#include "opentalk/ui/SupportReport.h"
 
+#include <QAbstractSpinBox>
 #include <QAccessible>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
+#include <QFile>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPushButton>
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimeZone>
 
 using namespace opentalk;
 
@@ -31,6 +40,11 @@ QStringList unnamedFocusableWidgets(QWidget *root)
     const QList<QWidget *> widgets = root->findChildren<QWidget *>();
     for (QWidget *widget : widgets) {
         if (widget->focusPolicy() == Qt::NoFocus || !widget->isVisibleTo(root)) {
+            continue;
+        }
+        // A spin box's internal editor is not exposed separately; the spin box itself is
+        // checked (and named) as its own focusable widget.
+        if (qobject_cast<QAbstractSpinBox *>(widget->parentWidget()) != nullptr) {
             continue;
         }
         QAccessibleInterface *iface = QAccessible::queryAccessibleInterface(widget);
@@ -52,6 +66,7 @@ private:
     QTemporaryDir m_dir;
     std::unique_ptr<storage::AppPaths> m_paths;
     std::unique_ptr<storage::SettingsStore> m_settings;
+    std::unique_ptr<storage::ServerProfileStore> m_profiles;
 
 private slots:
     void init()
@@ -61,11 +76,12 @@ private slots:
         QFile::remove(m_paths->clientSettingsFile());
         m_settings = std::make_unique<storage::SettingsStore>(storage::client::schema(), m_paths->clientSettingsFile());
         m_settings->load();
+        m_profiles = std::make_unique<storage::ServerProfileStore>(m_paths->serverProfilesFile());
     }
 
     void everyFocusableControlHasAnAccessibleName()
     {
-        ui::MainWindow window(*m_settings, *m_paths);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
         window.show();
         const QStringList problems = unnamedFocusableWidgets(&window);
         QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QStringLiteral(", "))));
@@ -73,7 +89,7 @@ private slots:
 
     void paneShortcutsAreAssignedAndWork()
     {
-        ui::MainWindow window(*m_settings, *m_paths);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
         window.show();
         window.activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(&window));
@@ -92,7 +108,7 @@ private slots:
 
     void f6CyclesThroughPanesInVisualOrder()
     {
-        ui::MainWindow window(*m_settings, *m_paths);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
         window.show();
         window.activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(&window));
@@ -110,7 +126,7 @@ private slots:
 
     void sendingWhileDisconnectedExplainsWhyAndKeepsText()
     {
-        ui::MainWindow window(*m_settings, *m_paths);
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
         window.show();
         auto *input = qobject_cast<QLineEdit *>(window.paneWidget(ui::MainWindow::Pane::MessageInput));
         QVERIFY(input != nullptr);
@@ -123,7 +139,7 @@ private slots:
     void closingSavesLayout()
     {
         {
-            ui::MainWindow window(*m_settings, *m_paths);
+            ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
             window.show();
             window.close();
         }
@@ -158,7 +174,7 @@ private slots:
     void settingsDialogAppliesAndSaves()
     {
         ui::SettingsDialog dialog(*m_settings, *m_paths);
-        auto *combo = dialog.findChild<QComboBox *>();
+        auto *combo = dialog.findChild<QComboBox *>(QStringLiteral("logLevel"));
         QVERIFY(combo != nullptr);
         combo->setCurrentIndex(combo->findData(QStringLiteral("debug")));
         const QList<QCheckBox *> boxes = dialog.findChildren<QCheckBox *>();
@@ -172,6 +188,168 @@ private slots:
         QCOMPARE(reloaded.value(storage::client::kLogLevel).toString(), QStringLiteral("debug"));
         QCOMPARE(reloaded.value(storage::client::kRestoreWindowLayout).toBool(), false);
         QCOMPARE(reloaded.value(storage::client::kAnnounceStatusChanges).toBool(), false);
+    }
+
+    void audioSettingsAreSaved()
+    {
+        ui::SettingsDialog dialog(*m_settings, *m_paths);
+        dialog.setKeyCapture([] { return std::optional<QKeySequence>(QKeySequence(Qt::Key_F12)); });
+        QVERIFY(dialog.selectCategory(QStringLiteral("Audio")));
+        QPushButton *change = nullptr;
+        for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
+            if (QString(button->text()).remove(QLatin1Char('&')).contains(QStringLiteral("Change key"))) {
+                change = button;
+            }
+        }
+        QVERIFY(change != nullptr);
+        change->click();
+        auto *mode = dialog.findChild<QComboBox *>(QStringLiteral("transmitMode"));
+        QVERIFY(mode != nullptr);
+        mode->setCurrentIndex(mode->findData(storage::client::kTransmitVoiceActivation));
+        QVERIFY(dialog.apply());
+
+        storage::SettingsStore reloaded(storage::client::schema(), m_paths->clientSettingsFile());
+        reloaded.load();
+        QCOMPARE(reloaded.value(storage::client::kPushToTalkKey).toString(), QStringLiteral("F12"));
+        QCOMPARE(reloaded.value(storage::client::kTransmitMode).toString(), storage::client::kTransmitVoiceActivation);
+    }
+
+    void audioMenuTogglesAndAnnounces()
+    {
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
+        QStringList spoken;
+        window.setAnnouncementHook([&spoken](const QString &text) { spoken.append(text); });
+        window.show();
+        window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        QTest::keyClick(&window, Qt::Key_M, Qt::ControlModifier);
+        QVERIFY(window.audio().isMicrophoneMuted());
+        QCOMPARE(window.voiceStatusText(), QStringLiteral("Microphone muted"));
+        QTest::keyClick(&window, Qt::Key_M, Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(window.audio().isDeafened());
+        QCOMPARE(window.voiceStatusText(), QStringLiteral("Sound muted, Microphone muted"));
+        QTest::keyClick(&window, Qt::Key_M, Qt::ControlModifier);
+        QTest::keyClick(&window, Qt::Key_M, Qt::ControlModifier | Qt::ShiftModifier);
+        QTest::keyClick(&window, Qt::Key_T, Qt::ControlModifier);
+        QVERIFY(window.audio().isTransmitLatched());
+        QCOMPARE(window.voiceStatusText(), QStringLiteral("Talk on")); // not connected, so not sending
+        QTRY_VERIFY(spoken.contains(QStringLiteral("Talking on")));
+        QVERIFY(spoken.contains(QStringLiteral("Microphone muted")));
+    }
+
+    void supportReportHidesTheHomeFolder()
+    {
+        ui::SupportReportInput input;
+        input.version = QStringLiteral("1.2.3");
+        input.dataMode = QStringLiteral("installed");
+        input.settings = {{QStringLiteral("media/lastFolder"), QStringLiteral("(left out)")}};
+#ifdef Q_OS_WIN
+        // Qt spells it with forward slashes; logs and folders use backslashes, in any case.
+        input.homeFolder = QStringLiteral("C:/Users/alice");
+        input.dataFolder = QStringLiteral("C:\\Users\\alice\\AppData\\Roaming\\OpenTalk");
+        input.log = QStringLiteral("line one\nopened C:\\Users\\Alice\\Music\\song.mp3");
+        const QString hiddenLog = QStringLiteral("opened %USERPROFILE%\\Music\\song.mp3");
+#else
+        input.homeFolder = QStringLiteral("/home/alice");
+        input.dataFolder = QStringLiteral("/home/alice/.local/share/OpenTalk");
+        input.log = QStringLiteral("line one\nopened /home/alice/music/song.mp3");
+        const QString hiddenLog = QStringLiteral("opened ~/music/song.mp3");
+#endif
+        const QString report =
+            ui::buildSupportReport(input, QDateTime(QDate(2026, 10, 29), QTime(12, 30), QTimeZone::utc()));
+        QVERIFY(report.contains(QStringLiteral("Created: 2026-10-29 12:30 UTC")));
+        QVERIFY(report.contains(QStringLiteral("Version: 1.2.3")));
+        QVERIFY(report.contains(QStringLiteral("media/lastFolder = (left out)")));
+        QVERIFY(report.contains(QStringLiteral("Plugins ==\nInstalled: none")));
+        QVERIFY(!report.contains(QStringLiteral("alice"), Qt::CaseInsensitive));
+        QVERIFY2(report.contains(hiddenLog), qPrintable(report));
+    }
+
+    void logTailKeepsTheLastLines()
+    {
+        const QString log = m_dir.filePath(QStringLiteral("tail.log"));
+        QFile file(log);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        for (int i = 1; i <= 500; ++i) {
+            file.write(QByteArray("line ") + QByteArray::number(i) + "\r\n");
+        }
+        file.close();
+        const QStringList lines = ui::readLogTail(log, 200).split(QLatin1Char('\n'));
+        QCOMPARE(lines.size(), 200);
+        QCOMPARE(lines.first(), QStringLiteral("line 301"));
+        QCOMPARE(lines.last(), QStringLiteral("line 500"));
+        QVERIFY(ui::readLogTail(m_dir.filePath(QStringLiteral("missing.log")), 10).isEmpty());
+    }
+
+    void supportFileShowsWhatHelpsAndNothingPrivate()
+    {
+        m_settings->setValue(storage::client::kLocalServerAdminName, QStringLiteral("SecretAdminName"));
+        m_settings->setValue(storage::client::kUserVolumes, QVariantMap{{QStringLiteral("Bobby Tables"), 150}});
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
+        window.show();
+        QString shown;
+        QStringList unnamed;
+        QString saved;
+        const QString target = m_dir.filePath(QStringLiteral("support.txt"));
+        window.setSupportDialogHook([&](ui::SupportFileDialog &dialog) {
+            dialog.show();
+            unnamed = unnamedFocusableWidgets(&dialog);
+            shown = dialog.text();
+            dialog.setFileChooser([&target](const QString &suggested) {
+                return suggested.endsWith(QStringLiteral(".txt")) ? target : QString();
+            });
+            dialog.save();
+            saved = dialog.resultText();
+        });
+        auto *action = window.findChild<QAction *>(QStringLiteral("supportFileAction"));
+        QVERIFY(action != nullptr);
+        action->trigger();
+        QVERIFY2(unnamed.isEmpty(), qPrintable(unnamed.join(QStringLiteral(", "))));
+        QVERIFY(shown.contains(QStringLiteral("OpenTalk support file")));
+        QVERIFY(shown.contains(QStringLiteral("Connection: disconnected")));
+        QVERIFY(shown.contains(QStringLiteral("Microphones:")));
+        QVERIFY(shown.contains(QStringLiteral("audio/transmitMode = pushToTalk")));
+        QVERIFY(shown.contains(QStringLiteral("localServer/adminName = (left out)")));
+        QVERIFY(shown.contains(QStringLiteral("== End of the log ==")));
+        QVERIFY(!shown.contains(QStringLiteral("SecretAdminName")));
+        QVERIFY(!shown.contains(QStringLiteral("Bobby Tables")));
+        QVERIFY(saved.startsWith(QStringLiteral("Saved as")));
+        // Saved with the platform's line endings (CRLF on Windows, for older editors).
+        QFile file(target);
+        QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(file.readAll()), shown);
+    }
+
+    void settingsCanBeExportedAndImported()
+    {
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
+        const QString exported = m_dir.filePath(QStringLiteral("my-settings.json"));
+        window.setSettingsFileChooser([&exported](bool) { return exported; });
+        m_settings->setValue(storage::client::kVoiceBitrate, 48);
+        window.findChild<QAction *>(QStringLiteral("exportSettingsAction"))->trigger();
+        QVERIFY(QFile::exists(exported));
+        QVERIFY(window.historyText().contains(QStringLiteral("Settings exported to")));
+
+        m_settings->setValue(storage::client::kVoiceBitrate, 24);
+        window.findChild<QAction *>(QStringLiteral("importSettingsAction"))->trigger();
+        QCOMPARE(m_settings->value(storage::client::kVoiceBitrate).toInt(), 48);
+        QVERIFY2(window.historyText().contains(QStringLiteral("Settings imported: 1 changed.")),
+                 qPrintable(window.historyText()));
+        QVERIFY(window.historyText().contains(QStringLiteral("Your previous settings were kept in")));
+        const QStringList backups =
+            QDir(m_paths->configDir()).entryList({QStringLiteral("client-settings.before-import-*.json")});
+        QCOMPARE(backups.size(), 1);
+        // The import is saved, so it lasts.
+        storage::SettingsStore reloaded(storage::client::schema(), m_paths->clientSettingsFile());
+        reloaded.load();
+        QCOMPARE(reloaded.value(storage::client::kVoiceBitrate).toInt(), 48);
+    }
+
+    void anUnexpectedExitIsMentioned()
+    {
+        ui::MainWindow window(*m_settings, *m_paths, *m_profiles, std::make_unique<audio::SyntheticAudioBackend>());
+        window.noteUnexpectedExit();
+        QVERIFY(window.historyText().contains(QStringLiteral("did not close properly last time")));
     }
 };
 

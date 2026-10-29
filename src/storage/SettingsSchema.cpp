@@ -2,8 +2,10 @@
 #include "opentalk/storage/SettingsSchema.h"
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QMetaType>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -23,8 +25,28 @@ bool hasType(const QVariant &value, SettingType type)
         return value.typeId() == QMetaType::QString;
     case SettingType::ByteArray:
         return value.typeId() == QMetaType::QByteArray;
+    case SettingType::IntMap: {
+        if (value.typeId() != QMetaType::QVariantMap) {
+            return false;
+        }
+        const QVariantMap map = value.toMap();
+        return std::all_of(map.cbegin(), map.cend(), [](const QVariant &v) { return v.typeId() == QMetaType::Int; });
+    }
     }
     return false;
+}
+
+std::optional<int> jsonToInt(const QJsonValue &json)
+{
+    if (!json.isDouble()) {
+        return std::nullopt;
+    }
+    const double number = json.toDouble();
+    if (std::floor(number) != number || number < std::numeric_limits<int>::min() ||
+        number > std::numeric_limits<int>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<int>(number);
 }
 
 } // namespace
@@ -80,15 +102,11 @@ std::optional<QVariant> SettingsSchema::fromJson(const QString &key, const QJson
         value = json.toBool();
         break;
     case SettingType::Int: {
-        if (!json.isDouble()) {
+        const std::optional<int> number = jsonToInt(json);
+        if (!number) {
             return std::nullopt;
         }
-        const double number = json.toDouble();
-        if (std::floor(number) != number || number < std::numeric_limits<int>::min() ||
-            number > std::numeric_limits<int>::max()) {
-            return std::nullopt;
-        }
-        value = static_cast<int>(number);
+        value = *number;
         break;
     }
     case SettingType::String:
@@ -107,6 +125,22 @@ std::optional<QVariant> SettingsSchema::fromJson(const QString &key, const QJson
             return std::nullopt;
         }
         value = *decoded;
+        break;
+    }
+    case SettingType::IntMap: {
+        if (!json.isObject()) {
+            return std::nullopt;
+        }
+        QVariantMap map;
+        const QJsonObject object = json.toObject();
+        for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+            const std::optional<int> number = jsonToInt(it.value());
+            if (!number) {
+                return std::nullopt;
+            }
+            map.insert(it.key(), *number);
+        }
+        value = map;
         break;
     }
     }
@@ -131,6 +165,14 @@ QJsonValue SettingsSchema::toJson(const QString &key, const QVariant &value) con
         return value.toString();
     case SettingType::ByteArray:
         return QString::fromLatin1(value.toByteArray().toBase64());
+    case SettingType::IntMap: {
+        QJsonObject object;
+        const QVariantMap map = value.toMap();
+        for (auto it = map.cbegin(); it != map.cend(); ++it) {
+            object.insert(it.key(), it.value().toInt());
+        }
+        return object;
+    }
     }
     return {};
 }

@@ -48,6 +48,11 @@ QString AppPaths::clientSettingsFile() const
     return configDir() + QStringLiteral("/client-settings.json");
 }
 
+QString AppPaths::serverProfilesFile() const
+{
+    return configDir() + QStringLiteral("/server-profiles.json");
+}
+
 QString AppPaths::clientLogFile() const
 {
     return logDir() + QStringLiteral("/opentalk-client.log");

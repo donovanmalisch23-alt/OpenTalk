@@ -4,14 +4,18 @@
 // happens here so the components themselves stay independent.
 
 #include "opentalk/logging/Logging.h"
+#include "opentalk/security/Tls.h"
 #include "opentalk/storage/AppPaths.h"
 #include "opentalk/storage/ClientSettings.h"
+#include "opentalk/storage/DataFolderLock.h"
+#include "opentalk/storage/ServerProfiles.h"
 #include "opentalk/storage/SettingsStore.h"
 #include "opentalk/ui/MainWindow.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QIcon>
 #include <QMessageBox>
 
 namespace {
@@ -32,6 +36,11 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("OpenTalk"));
     QApplication::setOrganizationName(QStringLiteral("OpenTalk"));
     QApplication::setApplicationVersion(QStringLiteral(OPENTALK_VERSION_STRING));
+    QIcon icon;
+    for (const int size : {16, 32, 48, 256}) {
+        icon.addFile(QStringLiteral(":/icons/opentalk-%1.png").arg(size), QSize(size, size));
+    }
+    QApplication::setWindowIcon(icon);
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("OpenTalk voice and text communication client"));
@@ -41,6 +50,9 @@ int main(int argc, char *argv[])
                                            QStringLiteral("Store settings and logs in <directory>."),
                                            QStringLiteral("directory"));
     parser.addOption(dataDirOption);
+    const QCommandLineOption noPluginsOption(
+        QStringLiteral("no-plugins"), QStringLiteral("Start without running any plugins (for troubleshooting)."));
+    parser.addOption(noPluginsOption);
     parser.process(app);
 
     const storage::AppPaths paths =
@@ -53,11 +65,28 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // One copy of OpenTalk per data folder: two would overwrite each other's settings and
+    // write to the same log. Checked before logging starts, for that reason.
+    storage::DataFolderLock dataFolderLock(paths.dataRoot());
+    const storage::DataFolderLock::Result lockResult = dataFolderLock.acquire();
+    if (lockResult == storage::DataFolderLock::Result::InUse) {
+        QMessageBox::information(nullptr, QStringLiteral("OpenTalk"),
+                                 QStringLiteral("OpenTalk is already running with this data folder:\n%1\n\n"
+                                                "Switch to its window (Alt+Tab). To run a second copy, start it with "
+                                                "--data-dir and another folder.")
+                                     .arg(QDir::toNativeSeparators(paths.dataRoot())));
+        return 0;
+    }
+
     // Start logging at the default level so problems while loading settings are recorded.
     logging::install({paths.clientLogFile(), logging::Level::Info, true});
     qCInfo(lcApp).noquote() << "OpenTalk" << QApplication::applicationVersion() << "starting; data folder"
                             << QDir::toNativeSeparators(paths.dataRoot()) << "(" << storage::toString(paths.mode())
                             << "mode)";
+    const bool exitedUnexpectedly = lockResult == storage::DataFolderLock::Result::AcquiredAfterUnexpectedExit;
+    if (exitedUnexpectedly) {
+        qCWarning(lcApp) << "OpenTalk did not exit normally the last time it ran";
+    }
 
     storage::SettingsStore settings(storage::client::schema(), paths.clientSettingsFile());
     const storage::LoadReport report = settings.load();
@@ -68,12 +97,33 @@ int main(int argc, char *argv[])
         }
     });
 
-    ui::MainWindow window(settings, paths);
+    storage::ServerProfileStore profiles(paths.serverProfilesFile());
+    const QStringList profileWarnings = profiles.load();
+
+    QString tlsError;
+    const bool tlsReady = security::initializeTls(&tlsError);
+    if (!tlsReady) {
+        qCWarning(lcApp).noquote() << "TLS unavailable:" << tlsError;
+    }
+
+    ui::MainWindow window(settings, paths, profiles);
     window.show();
-    if (!report.warnings.isEmpty()) {
-        // Shown after the window so focus returns to it when the message is dismissed.
-        QMessageBox::warning(&window, QStringLiteral("OpenTalk settings"),
-                             report.warnings.join(QStringLiteral("\n\n")));
+    if (exitedUnexpectedly) {
+        window.noteUnexpectedExit();
+    }
+    // Messages are shown after the window so focus returns to it when they are dismissed.
+    QStringList warnings = report.warnings + profileWarnings;
+    if (!tlsReady) {
+        warnings.append(QStringLiteral("Secure connections are not available, so you cannot connect to servers: ") +
+                        tlsError);
+    }
+    if (!warnings.isEmpty()) {
+        QMessageBox::warning(&window, QStringLiteral("OpenTalk"), warnings.join(QStringLiteral("\n\n")));
+    }
+    if (parser.isSet(noPluginsOption)) {
+        qCInfo(lcApp) << "Plugins are not started (--no-plugins)";
+    } else {
+        window.startPlugins();
     }
 
     const int exitCode = QApplication::exec();

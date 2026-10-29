@@ -112,7 +112,7 @@ See [accessibility/plan.md](accessibility/plan.md) for the measurable acceptance
 
 | ID | Requirement |
 |---|---|
-| D-1 | Windows x64 desktop: an installer and a portable zip. The minimum Windows version is an open owner decision, see [status.md](status.md). |
+| D-1 | Windows x64 desktop: an installer and a portable zip. **Minimum: Windows 10** (version 1809 or later, which is Qt 6.8's minimum) and Windows 11. This is an owner decision from 2026-10-26. |
 | D-2 | Routine client use never needs administrator rights. |
 | D-3 | Headless server mode, usable on a LAN, a dedicated machine or a VPS. |
 | D-4 | Documented ports, firewall and port-forwarding steps, and connectivity diagnostics. No mandatory relay or central service. |

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Static analysis run in CI (see .github/workflows/ci.yml). Checks that find real bugs
+# are on; any finding fails CI. What is turned off, and why:
+# - bugprone-easily-swappable-parameters, -narrowing-conversions,
+#   -implicit-widening-of-multiplication-result, -branch-clone: style; the compilers'
+#   -Wconversion -Wsign-conversion already catch narrowing.
+# - bugprone-unchecked-optional-access: does not follow OpenTalk's early-return checks.
+# - clang-analyzer-cplusplus.NewDelete(Leaks): false positives inside Qt's reference
+#   counting and QMetaObject::invokeMethod; AddressSanitizer and LeakSanitizer check
+#   memory at run time in CI instead.
+# - clang-analyzer-optin.*: padding and similar optimisation advice.
+# - performance-unnecessary-copy-initialization: it flags copies taken on purpose just
+#   before the element is removed from its container (a reference would dangle).
+# - performance-unnecessary-value-param, -move-const-arg, -no-automatic-move,
+#   -implicit-conversion-in-loop, -enum-size, -avoid-endl: micro-optimisations in code
+#   that is not hot; Qt's containers have no move overloads for many of them.
+# - cert-err58-cpp: every static QString would be reported.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-branch-clone,
+  -bugprone-unchecked-optional-access,
+  clang-analyzer-*,
+  -clang-analyzer-cplusplus.NewDelete,
+  -clang-analyzer-cplusplus.NewDeleteLeaks,
+  -clang-analyzer-optin.*,
+  performance-*,
+  -performance-unnecessary-copy-initialization,
+  -performance-unnecessary-value-param,
+  -performance-move-const-arg,
+  -performance-no-automatic-move,
+  -performance-implicit-conversion-in-loop,
+  -performance-enum-size,
+  -performance-avoid-endl,
+  misc-redundant-expression,
+  misc-misplaced-const,
+  misc-unconventional-assign-operator,
+  misc-throw-by-value-catch-by-reference,
+  misc-definitions-in-headers,
+  cert-oop54-cpp
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/src/.*\.h$'
+FormatStyle: none

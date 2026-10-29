@@ -33,6 +33,14 @@ struct LoadReport {
     QString backupPath;
 };
 
+/// What happened when settings were imported from a file.
+struct ImportReport {
+    bool ok = false; ///< False when the file was not used at all; `error` says why.
+    QString error;
+    int changed = 0;     ///< How many settings now have a different value.
+    QStringList skipped; ///< Human-readable notes about values that were not imported.
+};
+
 /// Loads, validates and atomically saves one JSON settings file described by a schema.
 ///
 /// Guarantees:
@@ -59,6 +67,15 @@ public:
 
     LoadReport load();
     bool save(QString *errorMessage = nullptr);
+
+    /// Writes every setting this version knows, except `excludedKeys`, to `path` in the
+    /// settings-file format, for moving settings to another computer or copy.
+    bool exportTo(const QString &path, const QStringList &excludedKeys, QString *errorMessage) const;
+    /// Applies the values in a file written by exportTo() (or a settings file), through
+    /// setValue(), so the usual change notifications happen. Unknown, invalid and excluded
+    /// values are skipped and listed in the report. Older formats are upgraded with the
+    /// registered migrations; files from a newer OpenTalk are refused. Does not save.
+    ImportReport importFrom(const QString &path, const QStringList &excludedKeys);
 
     QVariant value(const QString &key) const;
     /// Returns false (and changes nothing) if the key is unknown or the value is invalid.

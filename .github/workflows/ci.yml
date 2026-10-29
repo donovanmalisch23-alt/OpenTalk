@@ -4,7 +4,13 @@ name: CI
 on:
   push:
     branches: ["**"]
+    # A version tag (v1.0.0-rc.1) also publishes a GitHub release: see the release job.
+    tags: ["v*"]
   pull_request:
+  # A release published on GitHub's website (with a new v* tag) gets the tested files.
+  # If the new tag also started a push run, the concurrency group below keeps only one.
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -27,6 +33,24 @@ jobs:
           arch: win64_msvc2022_64
           cache: true
 
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: vcpkg-x64-windows-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg-overlay-ports/**') }}
+
+      - name: Set up vcpkg at the pinned commit
+        shell: pwsh
+        run: |
+          $sha = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          $root = "$env:RUNNER_TEMP/vcpkg"
+          git clone --quiet https://github.com/microsoft/vcpkg $root
+          git -C $root checkout --quiet $sha
+          & "$root/bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/vcpkg-cache" | Out-Null
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP/vcpkg-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -35,11 +59,38 @@ jobs:
       - name: Configure
         run: cmake --preset windows-msvc-release
 
+      - name: Put vcpkg DLLs (OpenSSL, libsodium) on PATH
+        shell: pwsh
+        run: |
+          $bin = (Resolve-Path build/windows-msvc-release/vcpkg_installed/x64-windows/bin).Path
+          if (-not (Test-Path "$bin/libssl-3-x64.dll")) { throw "vcpkg did not provide libssl-3-x64.dll" }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "OPENSSL_BIN=$bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build
         run: cmake --build --preset windows-msvc-release
 
       - name: Test
+        env:
+          # Without a console, Qt sends warnings to the debugger; this keeps them in the log.
+          QT_FORCE_STDERR_LOGGING: "1"
         run: ctest --preset windows-msvc-release
+
+      - name: Show the complete output of failed tests
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = "build/windows-msvc-release/Testing/Temporary/LastTest.log"
+          if (-not (Test-Path $log)) { return }
+          # LastTest.log has one block per test; print the blocks of tests that failed.
+          $block = @()
+          foreach ($line in Get-Content $log) {
+            $block += $line
+            if ($line -match '^Test (Passed|Failed)\.|^"[^"]+" end time') {
+              if (($block -join "`n") -match 'Test Failed\.') { $block | Write-Host }
+              $block = @()
+            }
+          }
 
       - name: Package portable build
         shell: pwsh
@@ -47,20 +98,150 @@ jobs:
           $stage = "OpenTalk-portable"
           New-Item -ItemType Directory -Force $stage | Out-Null
           # qt_standard_project_setup() may place executables at the build root on Windows.
-          $exe = Get-ChildItem -Path build/windows-msvc-release -Recurse -Filter OpenTalk.exe | Select-Object -First 1
-          if (-not $exe) { throw "OpenTalk.exe was not found in the build directory" }
-          Write-Host "Packaging $($exe.FullName)"
-          Copy-Item $exe.FullName $stage/
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw "$stage/OpenTalk.exe"
-          New-Item -ItemType File "$stage/OpenTalk.portable" | Out-Null
+          foreach ($name in "OpenTalk.exe", "opentalk-server.exe", "opentalk-ping.exe", "opentalk-audio-bench.exe",
+                            "opentalk-greeter-bot.exe") {
+            $exe = Get-ChildItem -Path build/windows-msvc-release -Recurse -Filter $name | Select-Object -First 1
+            if (-not $exe) { throw "$name was not found in the build directory" }
+            Write-Host "Packaging $($exe.FullName)"
+            Copy-Item $exe.FullName $stage/
+          }
+          windeployqt --release --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw `
+            "$stage/OpenTalk.exe" "$stage/opentalk-server.exe" "$stage/opentalk-ping.exe" "$stage/opentalk-audio-bench.exe" `
+            "$stage/opentalk-greeter-bot.exe"
+          # OpenSSL, libsodium, Opus and speexdsp from vcpkg (the same build the tests used). Only
+          # these: vcpkg's bin folder also holds DLLs OpenTalk does not use (OpenSSL's legacy
+          # provider, pkgconf), which must not be shipped.
+          $needed = '^(libssl-3-x64|libcrypto-3-x64|libsodium|opus|libspeexdsp|speexdsp)\.dll$'
+          $libs = Get-ChildItem -Path $env:OPENSSL_BIN -Filter *.dll | Where-Object { $_.Name -match $needed }
+          foreach ($name in "libssl-3-x64.dll", "libcrypto-3-x64.dll", "libsodium.dll", "opus.dll") {
+            if (-not ($libs.Name -contains $name)) { throw "vcpkg did not build $name" }
+          }
+          if (-not ($libs.Name -match 'speexdsp')) { throw "vcpkg did not build speexdsp" }
+          $libs | Copy-Item -Destination $stage/
+          # windeployqt skips Qt's OpenSSL TLS plugin because OpenSSL is not part of Qt; copy it.
+          $plugin = Get-ChildItem -Path "$env:RUNNER_WORKSPACE/Qt" -Recurse -Filter qopensslbackend.dll | Select-Object -First 1
+          if (-not $plugin) { throw "qopensslbackend.dll not found in the Qt installation" }
+          Copy-Item $plugin.FullName "$stage/tls/"
+          if (-not (Test-Path "$stage/tls/qopensslbackend.dll")) { throw "Qt's OpenSSL TLS plugin was not deployed" }
+          # Example plugins, ready for Plugins > Manage plugins > Install from folder. Plugins
+          # run with OpenTalk's folder on their PATH, so the C++ example uses the Qt shipped here.
+          $dice = "build/windows-msvc-release/plugins/org.opentalk.examples.dice"
+          New-Item -ItemType Directory -Force "$stage/examples/plugins/dice" | Out-Null
+          Copy-Item "$dice/opentalk-dice-plugin.exe", "$dice/plugin.json" "$stage/examples/plugins/dice/"
+          Copy-Item -Recurse examples/plugins/hello-python "$stage/examples/plugins/hello-python"
+          # Any content works; the text explains the file to someone who finds it.
+          Set-Content -Path "$stage/OpenTalk.portable" -Value ("This file makes OpenTalk keep its settings and logs in the " +
+            "data folder next to it (portable mode). Delete it to keep them in your Windows user profile instead.")
           Copy-Item LICENSE "$stage/LICENSE.txt"
           Copy-Item README.md "$stage/README.md"
+          # Licence notices for everything bundled: Qt and the code inside it, and the
+          # exact licence files vcpkg installed with the libraries that were built.
+          Copy-Item packaging/licenses/THIRD-PARTY-NOTICES.txt "$stage/THIRD-PARTY-NOTICES.txt"
+          New-Item -ItemType Directory -Force "$stage/licenses" | Out-Null
+          Copy-Item -Recurse packaging/licenses/qt "$stage/licenses/qt"
+          Copy-Item third_party/miniaudio/LICENSE "$stage/licenses/miniaudio.txt"
+          $share = "build/windows-msvc-release/vcpkg_installed/x64-windows/share"
+          foreach ($port in "openssl", "libsodium", "opus", "speexdsp") {
+            $file = "$share/$port/copyright"
+            if (-not (Test-Path $file)) { throw "vcpkg did not install a licence file for $port" }
+            Copy-Item $file "$stage/licenses/$port.txt"
+          }
+          # Every DLL in the package must be one the notices cover.
+          $known = '^(Qt6\w+|libssl-3-x64|libcrypto-3-x64|libsodium|opus|(lib)?speexdsp|vcruntime140(_1)?|msvcp140(_\w+)?|concrt140|vccorlib140|q\w+|d3dcompiler_47|opengl32sw|dxcompiler|dxil)\.dll$'
+          $unknown = Get-ChildItem -Path $stage -Recurse -Filter *.dll | Where-Object { $_.Name -notmatch $known }
+          if ($unknown) { throw "DLLs without a licence notice: $($unknown.Name -join ', ')" }
+
+      - name: Smoke-test the portable package
+        shell: pwsh
+        run: |
+          # Only Windows itself on PATH: the package must not rely on the build machine's Qt or OpenSSL.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $stage = "OpenTalk-portable"
+          $out = New-TemporaryFile
+          $server = Start-Process -FilePath "$stage/opentalk-server.exe" -NoNewWindow -PassThru `
+            -RedirectStandardOutput $out `
+            -ArgumentList "--data-dir `"$env:RUNNER_TEMP/smoke-data`" --listen 127.0.0.1 --port 0 --allow-guests"
+          for ($i = 0; $i -lt 30 -and -not (Select-String -Path $out -Pattern "Press Ctrl" -Quiet); $i++) { Start-Sleep 1 }
+          $text = Get-Content $out -Raw
+          Write-Host $text
+          $port = [regex]::Match($text, "running on port (\d+)").Groups[1].Value
+          $fingerprint = [regex]::Match($text, "(SHA256:[0-9A-F:]+)").Groups[1].Value
+          if (-not $port) { Stop-Process $server -ErrorAction SilentlyContinue; throw "packaged server did not start" }
+          # The package must carry a supported OpenSSL series (3.5 LTS, from vcpkg-overlay-ports).
+          if (-not ($text -match "TLS library: OpenSSL 3\.5\.")) {
+            Stop-Process $server -ErrorAction SilentlyContinue
+            throw "the packaged OpenSSL is not from the 3.5 LTS series"
+          }
+          & "$stage/opentalk-ping.exe" 127.0.0.1 --port $port --fingerprint $fingerprint
+          $code = $LASTEXITCODE
+          Stop-Process $server
+          if ($code -ne 0) { throw "packaged opentalk-ping could not connect (exit code $code)" }
+          # The audio libraries (Opus, miniaudio) load and work, and voice crosses a real server.
+          & "$stage/opentalk-audio-bench.exe" codec
+          if ($LASTEXITCODE -ne 0) { throw "packaged opentalk-audio-bench failed (exit code $LASTEXITCODE)" }
+          & "$stage/opentalk-audio-bench.exe" network
+          if ($LASTEXITCODE -ne 0) { throw "packaged voice path failed (exit code $LASTEXITCODE)" }
+          # The example bot loads with the packaged libraries.
+          & "$stage/opentalk-greeter-bot.exe" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "packaged opentalk-greeter-bot failed to start (exit code $LASTEXITCODE)" }
+          # The example plugin starts and answers the handshake, with OpenTalk's folder on PATH
+          # as when the app runs it.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$((Resolve-Path $stage).Path)"
+          $reply = '{"type":"hello","apiVersion":1}', '{"type":"shutdown"}' | & "$stage/examples/plugins/dice/opentalk-dice-plugin.exe"
+          Write-Host $reply
+          if (-not ($reply -match '"type":"ready"')) { throw "packaged dice plugin did not answer the handshake" }
+
+      - name: Build and test the installer
+        shell: pwsh
+        run: |
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "could not install NSIS" }
+          }
+          $cmake = Get-Content CMakeLists.txt -Raw
+          $version = [regex]::Match($cmake, 'VERSION (\d+\.\d+\.\d+)').Groups[1].Value
+          $label = [regex]::Match($cmake, 'set\(OPENTALK_VERSION_LABEL "([^"]*)"\)').Groups[1].Value
+          $display = if ($label) { "$version-$label" } else { $version }
+          $setup = "$PWD\OpenTalk-$display-setup-x64.exe"
+          & $makensis /V2 "/DVERSION=$version" "/DDISPLAY_VERSION=$display" "/DSOURCE=$((Resolve-Path OpenTalk-portable).Path)" `
+            "/DOUTFILE=$setup" packaging/windows/opentalk.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          # Silent per-user install into a test folder, as a person without administrator rights would.
+          $dir = "$env:RUNNER_TEMP\OpenTalk-installed"
+          Start-Process -FilePath $setup -ArgumentList "/S", "/D=$dir" -Wait
+          foreach ($file in "OpenTalk.exe", "opentalk-server.exe", "THIRD-PARTY-NOTICES.txt", "licenses\openssl.txt",
+                            "tls\qopensslbackend.dll", "Uninstall OpenTalk.exe") {
+            if (-not (Test-Path "$dir\$file")) { throw "the installer did not install $file" }
+          }
+          if (Test-Path "$dir\OpenTalk.portable") { throw "the installed copy must not be in portable mode" }
+          $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenTalk"
+          if ((Get-ItemProperty $key).DisplayVersion -ne $display) { throw "the uninstall entry is missing" }
+          # The installed programs run with only Windows on PATH.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $reported = & "$dir\opentalk-server.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "the installed server does not start" }
+          if (-not ($reported -match [regex]::Escape($display))) { throw "the server reports '$reported', not $display" }
+          # Uninstall (in place, so this waits for it) removes the program but leaves other files alone.
+          New-Item -ItemType File "$dir\keep-me.txt" | Out-Null
+          Start-Process -FilePath "$dir\Uninstall OpenTalk.exe" -ArgumentList "/S", "_?=$dir" -Wait
+          if (Test-Path "$dir\OpenTalk.exe") { throw "the uninstaller left OpenTalk.exe" }
+          if (-not (Test-Path "$dir\keep-me.txt")) { throw "the uninstaller deleted a file it did not install" }
+          if (Test-Path $key) { throw "the uninstaller left the uninstall entry" }
+          "SETUP=$setup" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload portable build
         uses: actions/upload-artifact@v4
         with:
           name: OpenTalk-portable-windows-x64
           path: OpenTalk-portable
+          retention-days: 14
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenTalk-setup-windows-x64
+          path: ${{ env.SETUP }}
           retention-days: 14
 
   linux:
@@ -72,7 +253,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev ninja-build clang-format
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev libspeexdsp-dev pkg-config ninja-build clang-format clang-tidy
 
       - name: Check formatting
         run: find src tests -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror
@@ -83,6 +264,9 @@ jobs:
           cmake --build --preset linux-debug
           ctest --preset linux-debug
 
+      - name: Static analysis (clang-tidy, rules in .clang-tidy)
+        run: run-clang-tidy -p build/linux-debug -quiet "$PWD/src/.*\.cpp$"
+
       - name: Build and test with AddressSanitizer and UBSan
         run: |
           cmake --preset linux-asan
@@ -90,7 +274,7 @@ jobs:
           ctest --preset linux-asan
 
   fuzz:
-    name: Fuzz protocol parsers (smoke run)
+    name: Fuzz parsers (smoke run)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -98,14 +282,127 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev ninja-build clang libclang-rt-18-dev
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libqt6sql6-sqlite libsodium-dev libssl-dev libopus-dev libspeexdsp-dev pkg-config ninja-build clang libclang-rt-18-dev
 
       - name: Build fuzzers
         run: |
           cmake --preset linux-fuzz
           cmake --build --preset linux-fuzz
 
-      - name: Run frame decoder fuzzer for 2 minutes
+      - name: Run each fuzzer for 1 minute
         run: |
-          mkdir -p corpus
-          build/linux-fuzz/tests/fuzz/fuzz_frame_decoder -max_total_time=120 corpus
+          mkdir -p artifacts
+          for target in frame_decoder message_decoder session server_core voice_router media_decoder; do
+            mkdir -p "corpus/$target"
+            if [ -d "tests/fuzz/seeds/$target" ]; then cp tests/fuzz/seeds/$target/* "corpus/$target/"; fi
+            echo "::group::fuzz_$target"
+            # -timeout: an input that takes longer than 30 seconds is reported as a hang.
+            "build/linux-fuzz/tests/fuzz/fuzz_$target" -max_total_time=60 -timeout=30 -artifact_prefix="artifacts/$target-" \
+              "corpus/$target"
+            echo "::endgroup::"
+          done
+
+      - name: Keep crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: artifacts
+
+  docker:
+    name: Server container image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t opentalk-server:ci .
+
+      - name: Start a server, connect to it and stop it
+        run: |
+          docker run -d --name ot -v ot-data:/data opentalk-server:ci --allow-guests
+          for i in $(seq 30); do docker logs ot 2>&1 | grep -q "Press Ctrl+C" && break; sleep 1; done
+          docker logs ot
+          fingerprint=$(docker logs ot 2>&1 | grep -o 'SHA256:[0-9A-F:]*' | head -1)
+          docker exec ot opentalk-ping 127.0.0.1 --fingerprint "$fingerprint"
+          for i in $(seq 30); do docker exec ot opentalk-server --data-dir /data --list-backups | grep -q opentalk- && break; sleep 1; done
+          docker exec ot opentalk-server --data-dir /data --list-backups | grep opentalk-
+          docker stop ot
+          test "$(docker inspect ot --format '{{.State.ExitCode}}')" = 0
+          docker logs ot 2>&1 | tail -1 | grep Stopped
+
+  # Runs only for a version tag (for example v1.0.0-rc.1), after every other job passed:
+  # publishes the portable zip and the installer that the windows job built and tested,
+  # with checksums, build provenance and the release notes from docs/release-notes.
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, fuzz, docker]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the portable build
+        uses: actions/download-artifact@v4
+        with:
+          name: OpenTalk-portable-windows-x64
+          path: dist/portable
+
+      - name: Download the installer
+        uses: actions/download-artifact@v4
+        with:
+          name: OpenTalk-setup-windows-x64
+          path: dist/setup
+
+      - name: Check the version and name the files
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          numeric=$(sed -n 's/^    VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt)
+          label=$(sed -n 's/^set(OPENTALK_VERSION_LABEL "\(.*\)")$/\1/p' CMakeLists.txt)
+          expected="${numeric}${label:+-$label}"
+          if [ "$version" != "$expected" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the version in CMakeLists.txt ($expected)"
+            exit 1
+          fi
+          notes="docs/release-notes/$version.md"
+          test -f "$notes" || { echo "::error::$notes is missing"; exit 1; }
+          test -f dist/portable/OpenTalk.exe || { echo "::error::the portable build has no OpenTalk.exe"; exit 1; }
+          test -s dist/portable/OpenTalk.portable || { echo "::error::the portable marker is missing"; exit 1; }
+          mkdir -p upload
+          # A top-level folder, so "Extract all" gives one tidy folder.
+          mv dist/portable "dist/OpenTalk-$version"
+          (cd dist && zip -r -9 -q "../upload/OpenTalk-$version-portable-windows-x64.zip" "OpenTalk-$version")
+          mv dist/setup/OpenTalk-*-setup-x64.exe "upload/OpenTalk-$version-setup-x64.exe"
+          (cd upload && sha256sum OpenTalk-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "NOTES=$notes" >> "$GITHUB_ENV"
+
+      - name: Record build provenance
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: |
+            upload/OpenTalk-*.zip
+            upload/OpenTalk-*.exe
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            # The release was made on GitHub's website (which also made the tag): attach the
+            # tested files to it and use the release notes from the repository.
+            gh release upload "$GITHUB_REF_NAME" --clobber \
+              upload/OpenTalk-*.zip upload/OpenTalk-*.exe upload/SHA256SUMS.txt
+            gh release edit "$GITHUB_REF_NAME" $prerelease --title "OpenTalk $VERSION" --notes-file "$NOTES"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag $prerelease \
+              --title "OpenTalk $VERSION" --notes-file "$NOTES" \
+              upload/OpenTalk-*.zip upload/OpenTalk-*.exe upload/SHA256SUMS.txt
+          fi

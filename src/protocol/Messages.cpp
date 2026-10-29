@@ -1,0 +1,855 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "opentalk/protocol/Messages.h"
+
+#include "opentalk/protocol/Frame.h"
+
+#include "AdminCodec.h"
+#include "CborFields.h"
+
+#include <QCborArray>
+#include <QCborMap>
+#include <QCborStreamReader>
+#include <QCborValue>
+
+#include <limits>
+
+namespace opentalk::protocol {
+namespace {
+
+using detail::FieldReader;
+using detail::id63;
+using detail::isBidiControl;
+
+// CBOR map keys. Small integers keep messages compact. Keys are scoped per message type
+// (and per nested structure); see docs/protocol/proposal.md.
+namespace key {
+// Hello
+constexpr qint64 kMinVersion = 1;
+constexpr qint64 kMaxVersion = 2;
+constexpr qint64 kClientName = 3;
+constexpr qint64 kClientVersion = 4;
+// Welcome
+constexpr qint64 kVersion = 1;
+constexpr qint64 kServerName = 2;
+constexpr qint64 kServerVersion = 3;
+constexpr qint64 kMaxPayload = 4;
+constexpr qint64 kHeartbeat = 5;
+constexpr qint64 kGuestsAllowed = 6;
+// Ping, Pong
+constexpr qint64 kToken = 1;
+// Goodbye, Error
+constexpr qint64 kCode = 1;
+constexpr qint64 kErrorRequestId = 2;
+constexpr qint64 kDetail = 3;
+// Authenticate
+constexpr qint64 kAuthMode = 1;
+constexpr qint64 kAuthName = 2;
+constexpr qint64 kAuthPassword = 3;
+// AuthResult
+constexpr qint64 kResultUserId = 1;
+constexpr qint64 kResultName = 2;
+constexpr qint64 kResultRole = 3;
+constexpr qint64 kResultCapabilities = 4;
+constexpr qint64 kResultChannelCapabilities = 5;
+// ChannelInfo (also the top level of ChannelAdded)
+constexpr qint64 kChId = 1;
+constexpr qint64 kChParent = 2;
+constexpr qint64 kChName = 3;
+constexpr qint64 kChTopic = 4;
+constexpr qint64 kChPersistent = 5;
+constexpr qint64 kChHasPassword = 6;
+constexpr qint64 kChMaxUsers = 7;
+// UserInfo (also the top level of UserJoined)
+constexpr qint64 kUsrId = 1;
+constexpr qint64 kUsrName = 2;
+constexpr qint64 kUsrRole = 3;
+constexpr qint64 kUsrChannel = 4;
+constexpr qint64 kUsrFlags = 5;
+constexpr qint64 kUsrStatus = 6;
+// StateSnapshot
+constexpr qint64 kSnapChannels = 1;
+constexpr qint64 kSnapUsers = 2;
+constexpr qint64 kSnapRoles = 3;
+// Requests: key 1 is always the request ID
+constexpr qint64 kRequestId = 1;
+constexpr qint64 kReqChannel = 2;   // JoinChannel, DeleteChannel
+constexpr qint64 kReqPassword = 3;  // JoinChannel
+constexpr qint64 kCreateParent = 2; // CreateChannel
+constexpr qint64 kCreateName = 3;
+constexpr qint64 kCreateTopic = 4;
+constexpr qint64 kCreatePersistent = 5;
+constexpr qint64 kCreatePassword = 6;
+constexpr qint64 kCreateMaxUsers = 7;
+constexpr qint64 kDoneResult = 2; // RequestDone
+// ChannelRemoved, UserLeft, UserMoved
+constexpr qint64 kSubjectId = 1;
+constexpr qint64 kMovedChannel = 2;
+// SendText
+constexpr qint64 kSendTarget = 2;
+constexpr qint64 kSendTargetId = 3;
+constexpr qint64 kSendText = 4;
+// TextMessage
+constexpr qint64 kMsgTarget = 1;
+constexpr qint64 kMsgFrom = 2;
+constexpr qint64 kMsgTargetId = 3;
+constexpr qint64 kMsgText = 4;
+constexpr qint64 kMsgTime = 5;
+// AudioSetup
+constexpr qint64 kAudioUdpPort = 1;
+constexpr qint64 kAudioUdpSession = 2;
+constexpr qint64 kAudioClientKey = 3;
+constexpr qint64 kAudioServerKey = 4;
+constexpr qint64 kAudioMaxBitrate = 5;
+// AudioData
+constexpr qint64 kDataStream = 1;
+constexpr qint64 kDataSequence = 2;
+constexpr qint64 kDataPayload = 3;
+constexpr qint64 kDataUser = 4;
+} // namespace key
+
+// ------------------------------------------------------------------------ encoding
+
+QCborMap channelToCbor(const ChannelInfo &c)
+{
+    return {{key::kChId, static_cast<qint64>(c.id)},
+            {key::kChParent, static_cast<qint64>(c.parentId)},
+            {key::kChName, c.name},
+            {key::kChTopic, c.topic},
+            {key::kChPersistent, c.persistent},
+            {key::kChHasPassword, c.hasPassword},
+            {key::kChMaxUsers, c.maxUsers}};
+}
+
+QCborMap userToCbor(const UserInfo &u)
+{
+    QCborMap map{{key::kUsrId, static_cast<qint64>(u.id)},
+                 {key::kUsrName, u.name},
+                 {key::kUsrRole, static_cast<qint64>(u.role)},
+                 {key::kUsrChannel, static_cast<qint64>(u.channelId)}};
+    if (u.flags != 0) {
+        map.insert(key::kUsrFlags, static_cast<qint64>(u.flags));
+    }
+    if (!u.status.isEmpty()) {
+        map.insert(key::kUsrStatus, u.status);
+    }
+    return map;
+}
+
+QCborMap toCbor(const Hello &m)
+{
+    return {{key::kMinVersion, m.versions.minimum},
+            {key::kMaxVersion, m.versions.maximum},
+            {key::kClientName, m.clientName},
+            {key::kClientVersion, m.clientVersion}};
+}
+
+QCborMap toCbor(const Welcome &m)
+{
+    return {{key::kVersion, m.version},
+            {key::kServerName, m.serverName},
+            {key::kServerVersion, m.serverVersion},
+            {key::kMaxPayload, static_cast<qint64>(m.maxPayloadSize)},
+            {key::kHeartbeat, m.heartbeatIntervalSeconds},
+            {key::kGuestsAllowed, m.guestsAllowed}};
+}
+
+QCborMap toCbor(const Ping &m)
+{
+    return {{key::kToken, id63(m.token)}};
+}
+
+QCborMap toCbor(const Pong &m)
+{
+    return {{key::kToken, id63(m.token)}};
+}
+
+QCborMap toCbor(const Goodbye &m)
+{
+    return {{key::kCode, static_cast<qint64>(m.reason)}};
+}
+
+QCborMap toCbor(const Error &m)
+{
+    QCborMap map{{key::kCode, static_cast<qint64>(m.code)}, {key::kDetail, m.detail.left(kMaxDetailLength)}};
+    if (m.requestId) {
+        map.insert(key::kErrorRequestId, id63(*m.requestId));
+    }
+    return map;
+}
+
+QCborMap toCbor(const Authenticate &m)
+{
+    QCborMap map{{key::kAuthMode, static_cast<int>(m.mode)}, {key::kAuthName, m.name}};
+    if (m.mode == Authenticate::Mode::Account) {
+        map.insert(key::kAuthPassword, m.password);
+    }
+    return map;
+}
+
+QCborMap toCbor(const AuthResult &m)
+{
+    return {{key::kResultUserId, static_cast<qint64>(m.userId)},
+            {key::kResultName, m.displayName},
+            {key::kResultRole, static_cast<qint64>(m.role)},
+            {key::kResultCapabilities, detail::capabilitiesToCbor(m.capabilities)},
+            {key::kResultChannelCapabilities, detail::capabilitiesToCbor(m.channelCapabilities)}};
+}
+
+QCborMap toCbor(const StateSnapshot &m)
+{
+    QCborArray channels;
+    for (const ChannelInfo &c : m.channels) {
+        channels.append(channelToCbor(c));
+    }
+    QCborArray users;
+    for (const UserInfo &u : m.users) {
+        users.append(userToCbor(u));
+    }
+    QCborArray roles;
+    for (const RoleInfo &r : m.roles) {
+        roles.append(detail::roleToCbor(r));
+    }
+    return {{key::kSnapChannels, channels}, {key::kSnapUsers, users}, {key::kSnapRoles, roles}};
+}
+
+QCborMap toCbor(const ChannelAdded &m)
+{
+    return channelToCbor(m.channel);
+}
+
+QCborMap toCbor(const ChannelUpdated &m)
+{
+    return channelToCbor(m.channel);
+}
+
+QCborMap toCbor(const ChannelRemoved &m)
+{
+    return {{key::kSubjectId, static_cast<qint64>(m.channelId)}};
+}
+
+QCborMap toCbor(const JoinChannel &m)
+{
+    QCborMap map{{key::kRequestId, id63(m.requestId)}, {key::kReqChannel, static_cast<qint64>(m.channelId)}};
+    if (!m.password.isEmpty()) {
+        map.insert(key::kReqPassword, m.password);
+    }
+    return map;
+}
+
+QCborMap toCbor(const CreateChannel &m)
+{
+    QCborMap map{{key::kRequestId, id63(m.requestId)},
+                 {key::kCreateParent, static_cast<qint64>(m.parentId)},
+                 {key::kCreateName, m.name},
+                 {key::kCreateTopic, m.topic},
+                 {key::kCreatePersistent, m.persistent},
+                 {key::kCreateMaxUsers, m.maxUsers}};
+    if (!m.password.isEmpty()) {
+        map.insert(key::kCreatePassword, m.password);
+    }
+    return map;
+}
+
+QCborMap toCbor(const DeleteChannel &m)
+{
+    return {{key::kRequestId, id63(m.requestId)}, {key::kReqChannel, static_cast<qint64>(m.channelId)}};
+}
+
+QCborMap toCbor(const RequestDone &m)
+{
+    QCborMap map{{key::kRequestId, id63(m.requestId)}};
+    if (m.resultId) {
+        map.insert(key::kDoneResult, static_cast<qint64>(*m.resultId));
+    }
+    return map;
+}
+
+QCborMap toCbor(const UserJoined &m)
+{
+    return userToCbor(m.user);
+}
+
+QCborMap toCbor(const UserLeft &m)
+{
+    return {{key::kSubjectId, static_cast<qint64>(m.userId)}};
+}
+
+QCborMap toCbor(const UserMoved &m)
+{
+    return {{key::kSubjectId, static_cast<qint64>(m.userId)}, {key::kMovedChannel, static_cast<qint64>(m.channelId)}};
+}
+
+QCborMap toCbor(const SendText &m)
+{
+    return {{key::kRequestId, id63(m.requestId)},
+            {key::kSendTarget, static_cast<int>(m.target)},
+            {key::kSendTargetId, static_cast<qint64>(m.targetId)},
+            {key::kSendText, m.text}};
+}
+
+QCborMap toCbor(const TextMessage &m)
+{
+    return {{key::kMsgTarget, static_cast<int>(m.target)},
+            {key::kMsgFrom, static_cast<qint64>(m.fromUserId)},
+            {key::kMsgTargetId, static_cast<qint64>(m.targetId)},
+            {key::kMsgText, m.text},
+            {key::kMsgTime, m.timestampMs}};
+}
+
+QCborMap toCbor(const AudioSetup &m)
+{
+    return {{key::kAudioUdpPort, m.udpPort},
+            {key::kAudioUdpSession, static_cast<qint64>(m.udpSessionId)},
+            {key::kAudioClientKey, m.clientToServerKey},
+            {key::kAudioServerKey, m.serverToClientKey},
+            {key::kAudioMaxBitrate, static_cast<qint64>(m.maxBitrate)}};
+}
+
+QCborMap toCbor(const AudioData &m)
+{
+    QCborMap map{{key::kDataStream, static_cast<int>(m.stream)},
+                 {key::kDataSequence, m.sequence},
+                 {key::kDataPayload, m.payload}};
+    if (m.userId != 0) {
+        map.insert(key::kDataUser, static_cast<qint64>(m.userId));
+    }
+    return map;
+}
+
+// ------------------------------------------------------------------------ decoding
+
+bool isKnownErrorCode(quint16 code)
+{
+    return code <= static_cast<quint16>(ErrorCode::Muted);
+}
+
+ErrorCode errorCodeFrom(quint16 code)
+{
+    // Unknown codes from newer peers are reported generically, not rejected.
+    return isKnownErrorCode(code) ? static_cast<ErrorCode>(code) : ErrorCode::InternalError;
+}
+
+ChannelInfo readChannel(FieldReader &r)
+{
+    ChannelInfo c;
+    c.id = r.integer<quint32>(key::kChId, "channel.id");
+    c.parentId = r.integer<quint32>(key::kChParent, "channel.parentId");
+    // The root channel has an empty name; every other channel needs a real one.
+    if (c.id == kRootChannelId) {
+        c.name = r.plainText(key::kChName, "channel.name", kMaxChannelNameLength, true);
+    } else {
+        c.name = r.name(key::kChName, "channel.name", kMaxChannelNameLength);
+    }
+    c.topic = r.plainText(key::kChTopic, "channel.topic", kMaxTopicLength, true);
+    c.persistent = r.boolean(key::kChPersistent, "channel.persistent", true);
+    c.hasPassword = r.boolean(key::kChHasPassword, "channel.hasPassword", true);
+    c.maxUsers = r.integer<quint16>(key::kChMaxUsers, "channel.maxUsers");
+    if (r.ok() && (c.id == 0 || (c.id == kRootChannelId) != (c.parentId == 0) || c.id == c.parentId)) {
+        r.fail(QStringLiteral("channel: invalid id or parent"));
+    }
+    return c;
+}
+
+UserInfo readUser(FieldReader &r)
+{
+    UserInfo u;
+    u.id = r.integer<quint32>(key::kUsrId, "user.id");
+    u.name = r.name(key::kUsrName, "user.name", kMaxDisplayNameLength);
+    u.role = static_cast<Role>(r.integer<quint32>(key::kUsrRole, "user.role"));
+    u.channelId = r.integer<quint32>(key::kUsrChannel, "user.channelId");
+    u.flags = r.optionalInteger<quint32>(key::kUsrFlags, "user.flags").value_or(0);
+    u.status = r.plainText(key::kUsrStatus, "user.status", kMaxStatusLength, false);
+    if (r.ok() && (u.id == 0 || u.channelId == 0)) {
+        r.fail(QStringLiteral("user: invalid id"));
+    }
+    return u;
+}
+
+MessageDecodeResult malformed(const QString &detail)
+{
+    return MessageDecodeFailure{ErrorCode::MalformedMessage, detail};
+}
+
+bool isKnownType(quint16 type)
+{
+    switch (static_cast<MessageType>(type)) {
+    case MessageType::Hello:
+    case MessageType::Welcome:
+    case MessageType::Ping:
+    case MessageType::Pong:
+    case MessageType::Goodbye:
+    case MessageType::Error:
+    case MessageType::Authenticate:
+    case MessageType::AuthResult:
+    case MessageType::StateSnapshot:
+    case MessageType::ChannelAdded:
+    case MessageType::ChannelRemoved:
+    case MessageType::JoinChannel:
+    case MessageType::CreateChannel:
+    case MessageType::DeleteChannel:
+    case MessageType::RequestDone:
+    case MessageType::UserJoined:
+    case MessageType::UserLeft:
+    case MessageType::UserMoved:
+    case MessageType::SendText:
+    case MessageType::TextMessage:
+    case MessageType::AudioSetup:
+    case MessageType::AudioData:
+    case MessageType::ChannelUpdated:
+        return true;
+    default:
+        return detail::isAdminType(static_cast<MessageType>(type));
+    }
+}
+
+} // namespace
+
+bool isValidName(const QString &text, qsizetype maxLength)
+{
+    if (text.size() > maxLength || text.trimmed().isEmpty() || text.trimmed() != text) {
+        return false;
+    }
+    for (const QChar c : text) {
+        if (c.category() == QChar::Other_Control || c.category() == QChar::Other_Format) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isValidChatText(const QString &text)
+{
+    if (text.size() > kMaxTextLength || text.trimmed().isEmpty()) {
+        return false;
+    }
+    for (const QChar c : text) {
+        if (c == QLatin1Char('\n') || c == QLatin1Char('\t')) {
+            continue;
+        }
+        // Other formatting characters such as the zero-width joiner stay allowed,
+        // because emoji sequences need them.
+        if (c.category() == QChar::Other_Control || isBidiControl(c.unicode())) {
+            return false;
+        }
+    }
+    return true;
+}
+
+MessageType messageType(const Message &message)
+{
+    struct Visitor {
+        MessageType operator()(const Hello &) const { return MessageType::Hello; }
+        MessageType operator()(const Welcome &) const { return MessageType::Welcome; }
+        MessageType operator()(const Ping &) const { return MessageType::Ping; }
+        MessageType operator()(const Pong &) const { return MessageType::Pong; }
+        MessageType operator()(const Goodbye &) const { return MessageType::Goodbye; }
+        MessageType operator()(const Error &) const { return MessageType::Error; }
+        MessageType operator()(const Authenticate &) const { return MessageType::Authenticate; }
+        MessageType operator()(const AuthResult &) const { return MessageType::AuthResult; }
+        MessageType operator()(const StateSnapshot &) const { return MessageType::StateSnapshot; }
+        MessageType operator()(const ChannelAdded &) const { return MessageType::ChannelAdded; }
+        MessageType operator()(const ChannelRemoved &) const { return MessageType::ChannelRemoved; }
+        MessageType operator()(const JoinChannel &) const { return MessageType::JoinChannel; }
+        MessageType operator()(const CreateChannel &) const { return MessageType::CreateChannel; }
+        MessageType operator()(const DeleteChannel &) const { return MessageType::DeleteChannel; }
+        MessageType operator()(const RequestDone &) const { return MessageType::RequestDone; }
+        MessageType operator()(const UserJoined &) const { return MessageType::UserJoined; }
+        MessageType operator()(const UserLeft &) const { return MessageType::UserLeft; }
+        MessageType operator()(const UserMoved &) const { return MessageType::UserMoved; }
+        MessageType operator()(const SendText &) const { return MessageType::SendText; }
+        MessageType operator()(const TextMessage &) const { return MessageType::TextMessage; }
+        MessageType operator()(const AudioSetup &) const { return MessageType::AudioSetup; }
+        MessageType operator()(const AudioData &) const { return MessageType::AudioData; }
+        MessageType operator()(const ChannelUpdated &) const { return MessageType::ChannelUpdated; }
+        MessageType operator()(const EditChannel &) const { return MessageType::EditChannel; }
+        MessageType operator()(const UserUpdated &) const { return MessageType::UserUpdated; }
+        MessageType operator()(const RolesChanged &) const { return MessageType::RolesChanged; }
+        MessageType operator()(const CapabilitiesChanged &) const { return MessageType::CapabilitiesChanged; }
+        MessageType operator()(const SanctionNotice &) const { return MessageType::SanctionNotice; }
+        MessageType operator()(const MoveUser &) const { return MessageType::MoveUser; }
+        MessageType operator()(const ApplySanction &) const { return MessageType::ApplySanction; }
+        MessageType operator()(const RevokeSanction &) const { return MessageType::RevokeSanction; }
+        MessageType operator()(const ListRequest &) const { return MessageType::ListRequest; }
+        MessageType operator()(const ListResult &) const { return MessageType::ListResult; }
+        MessageType operator()(const SetUserRole &) const { return MessageType::SetUserRole; }
+        MessageType operator()(const ReportUser &) const { return MessageType::ReportUser; }
+        MessageType operator()(const ResolveReport &) const { return MessageType::ResolveReport; }
+        MessageType operator()(const SubmitAppeal &) const { return MessageType::SubmitAppeal; }
+        MessageType operator()(const DecideAppeal &) const { return MessageType::DecideAppeal; }
+        MessageType operator()(const ReadAudit &) const { return MessageType::ReadAudit; }
+        MessageType operator()(const AuditPage &) const { return MessageType::AuditPage; }
+        MessageType operator()(const CreateAccount &) const { return MessageType::CreateAccount; }
+        MessageType operator()(const DeleteAccount &) const { return MessageType::DeleteAccount; }
+        MessageType operator()(const SetAccountPassword &) const { return MessageType::SetAccountPassword; }
+        MessageType operator()(const SaveRole &) const { return MessageType::SaveRole; }
+        MessageType operator()(const DeleteRole &) const { return MessageType::DeleteRole; }
+        MessageType operator()(const AddRule &) const { return MessageType::AddRule; }
+        MessageType operator()(const DeleteRule &) const { return MessageType::DeleteRule; }
+        MessageType operator()(const ServerSettingsRequest &) const { return MessageType::ServerSettingsRequest; }
+        MessageType operator()(const ServerSettingsResult &) const { return MessageType::ServerSettingsResult; }
+        MessageType operator()(const GetServerStats &) const { return MessageType::GetServerStats; }
+        MessageType operator()(const ServerStatsResult &) const { return MessageType::ServerStatsResult; }
+        MessageType operator()(const TransferOwnership &) const { return MessageType::TransferOwnership; }
+        MessageType operator()(const SetStatus &) const { return MessageType::SetStatus; }
+    };
+    return std::visit(Visitor{}, message);
+}
+
+bool isClientToServer(MessageType type)
+{
+    switch (type) {
+    case MessageType::Hello:
+    case MessageType::Ping:
+    case MessageType::Pong:
+    case MessageType::Goodbye:
+    case MessageType::Error:
+    case MessageType::Authenticate:
+    case MessageType::JoinChannel:
+    case MessageType::CreateChannel:
+    case MessageType::DeleteChannel:
+    case MessageType::SendText:
+    case MessageType::AudioData:
+    case MessageType::EditChannel:
+    case MessageType::MoveUser:
+    case MessageType::ApplySanction:
+    case MessageType::RevokeSanction:
+    case MessageType::ListRequest:
+    case MessageType::SetUserRole:
+    case MessageType::ReportUser:
+    case MessageType::ResolveReport:
+    case MessageType::SubmitAppeal:
+    case MessageType::DecideAppeal:
+    case MessageType::ReadAudit:
+    case MessageType::CreateAccount:
+    case MessageType::DeleteAccount:
+    case MessageType::SetAccountPassword:
+    case MessageType::SaveRole:
+    case MessageType::DeleteRole:
+    case MessageType::AddRule:
+    case MessageType::DeleteRule:
+    case MessageType::ServerSettingsRequest:
+    case MessageType::GetServerStats:
+    case MessageType::TransferOwnership:
+    case MessageType::SetStatus:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool isServerToClient(MessageType type)
+{
+    switch (type) {
+    case MessageType::Welcome:
+    case MessageType::Ping:
+    case MessageType::Pong:
+    case MessageType::Goodbye:
+    case MessageType::Error:
+    case MessageType::AuthResult:
+    case MessageType::StateSnapshot:
+    case MessageType::ChannelAdded:
+    case MessageType::ChannelRemoved:
+    case MessageType::RequestDone:
+    case MessageType::UserJoined:
+    case MessageType::UserLeft:
+    case MessageType::UserMoved:
+    case MessageType::TextMessage:
+    case MessageType::AudioSetup:
+    case MessageType::AudioData:
+    case MessageType::ChannelUpdated:
+    case MessageType::UserUpdated:
+    case MessageType::RolesChanged:
+    case MessageType::CapabilitiesChanged:
+    case MessageType::SanctionNotice:
+    case MessageType::ListResult:
+    case MessageType::AuditPage:
+    case MessageType::ServerSettingsResult:
+    case MessageType::ServerStatsResult:
+        return true;
+    default:
+        return false;
+    }
+}
+
+QByteArray encodeMessage(const Message &message, quint32 maxPayloadSize)
+{
+    const QCborMap map = std::visit([](const auto &m) { return toCbor(m); }, message);
+    const QByteArray payload = map.toCborValue().toCbor();
+    return encodeFrame(static_cast<quint16>(messageType(message)), payload, maxPayloadSize).value_or(QByteArray());
+}
+
+MessageDecodeResult decodeMessage(quint16 type, QByteArrayView payload)
+{
+    if (!isKnownType(type)) {
+        return MessageDecodeFailure{ErrorCode::UnknownMessage,
+                                    QStringLiteral("unknown message type 0x%1").arg(type, 4, 16, QLatin1Char('0'))};
+    }
+
+    QCborStreamReader reader(reinterpret_cast<const quint8 *>(payload.data()), payload.size());
+    const QCborValue root = QCborValue::fromCbor(reader);
+    if (reader.lastError() != QCborError::NoError) {
+        return malformed(QStringLiteral("invalid CBOR: ") + reader.lastError().toString());
+    }
+    if (reader.currentOffset() != payload.size()) {
+        return malformed(QStringLiteral("trailing bytes after the message"));
+    }
+    if (!root.isMap()) {
+        return malformed(QStringLiteral("payload is not a map"));
+    }
+    const QCborMap map = root.toMap();
+    FieldReader r(map);
+
+    Message message;
+    switch (static_cast<MessageType>(type)) {
+    case MessageType::Hello: {
+        Hello m;
+        m.versions.minimum = r.integer<quint16>(key::kMinVersion, "minVersion");
+        m.versions.maximum = r.integer<quint16>(key::kMaxVersion, "maxVersion");
+        m.clientName = r.name(key::kClientName, "clientName", kMaxNameLength);
+        m.clientVersion = r.name(key::kClientVersion, "clientVersion", kMaxNameLength);
+        if (r.ok() && !m.versions.isValid()) {
+            return malformed(QStringLiteral("version range is invalid"));
+        }
+        message = m;
+        break;
+    }
+    case MessageType::Welcome: {
+        Welcome m;
+        m.version = r.integer<quint16>(key::kVersion, "version");
+        m.serverName = r.name(key::kServerName, "serverName", kMaxNameLength);
+        m.serverVersion = r.name(key::kServerVersion, "serverVersion", kMaxNameLength);
+        m.maxPayloadSize = r.integer<quint32>(key::kMaxPayload, "maxPayloadSize");
+        m.heartbeatIntervalSeconds = r.integer<quint16>(key::kHeartbeat, "heartbeatIntervalSeconds");
+        m.guestsAllowed = r.boolean(key::kGuestsAllowed, "guestsAllowed", false);
+        if (r.ok() && (m.version == 0 || m.maxPayloadSize < 1024 || m.heartbeatIntervalSeconds == 0)) {
+            return malformed(QStringLiteral("Welcome values out of range"));
+        }
+        message = m;
+        break;
+    }
+    case MessageType::Ping:
+        message = Ping{r.integer<quint64>(key::kToken, "token")};
+        break;
+    case MessageType::Pong:
+        message = Pong{r.integer<quint64>(key::kToken, "token")};
+        break;
+    case MessageType::Goodbye:
+        message = Goodbye{errorCodeFrom(r.integer<quint16>(key::kCode, "code"))};
+        break;
+    case MessageType::Error: {
+        Error m;
+        m.code = errorCodeFrom(r.integer<quint16>(key::kCode, "code"));
+        m.requestId = r.optionalInteger<quint64>(key::kErrorRequestId, "requestId");
+        m.detail = r.plainText(key::kDetail, "detail", kMaxDetailLength, true);
+        message = m;
+        break;
+    }
+    case MessageType::Authenticate: {
+        Authenticate m;
+        m.mode = r.enumeration<Authenticate::Mode>(key::kAuthMode, "mode", Authenticate::Mode::Guest);
+        m.name = r.name(key::kAuthName, "name", kMaxDisplayNameLength);
+        if (m.mode == Authenticate::Mode::Account) {
+            m.password = r.secret(key::kAuthPassword, "password", true);
+        }
+        message = m;
+        break;
+    }
+    case MessageType::AuthResult: {
+        AuthResult m;
+        m.userId = r.integer<quint32>(key::kResultUserId, "userId");
+        m.displayName = r.name(key::kResultName, "displayName", kMaxDisplayNameLength);
+        m.role = static_cast<Role>(r.integer<quint32>(key::kResultRole, "role"));
+        if (map.contains(key::kResultCapabilities)) {
+            m.capabilities = detail::readCapabilities(r, key::kResultCapabilities, "capabilities");
+        }
+        if (map.contains(key::kResultChannelCapabilities)) {
+            m.channelCapabilities = detail::readCapabilities(r, key::kResultChannelCapabilities, "channelCapabilities");
+        }
+        if (r.ok() && m.userId == 0) {
+            return malformed(QStringLiteral("userId must not be 0"));
+        }
+        message = m;
+        break;
+    }
+    case MessageType::StateSnapshot: {
+        StateSnapshot m;
+        const QCborArray channels = r.array(key::kSnapChannels, "channels", kMaxSnapshotEntries);
+        const QCborArray users = r.array(key::kSnapUsers, "users", kMaxSnapshotEntries);
+        for (qsizetype i = 0; r.ok() && i < channels.size(); ++i) {
+            const QCborMap entry = channels.at(i).toMap();
+            FieldReader sub(entry);
+            m.channels.append(readChannel(sub));
+            if (!channels.at(i).isMap() || !sub.ok()) {
+                return malformed(sub.ok() ? QStringLiteral("channel entry is not a map") : sub.failure());
+            }
+        }
+        for (qsizetype i = 0; r.ok() && i < users.size(); ++i) {
+            const QCborMap entry = users.at(i).toMap();
+            FieldReader sub(entry);
+            m.users.append(readUser(sub));
+            if (!users.at(i).isMap() || !sub.ok()) {
+                return malformed(sub.ok() ? QStringLiteral("user entry is not a map") : sub.failure());
+            }
+        }
+        if (r.ok() && map.contains(key::kSnapRoles)) {
+            const QCborArray roles = r.array(key::kSnapRoles, "roles", 1000);
+            for (qsizetype i = 0; r.ok() && i < roles.size(); ++i) {
+                const QCborMap entry = roles.at(i).toMap();
+                FieldReader sub(entry);
+                m.roles.append(detail::readRole(sub));
+                if (!roles.at(i).isMap() || !sub.ok()) {
+                    return malformed(sub.ok() ? QStringLiteral("role entry is not a map") : sub.failure());
+                }
+            }
+        }
+        message = m;
+        break;
+    }
+    case MessageType::ChannelAdded:
+        message = ChannelAdded{readChannel(r)};
+        break;
+    case MessageType::ChannelRemoved:
+        message = ChannelRemoved{r.integer<quint32>(key::kSubjectId, "channelId")};
+        break;
+    case MessageType::ChannelUpdated:
+        message = ChannelUpdated{readChannel(r)};
+        break;
+    case MessageType::JoinChannel: {
+        JoinChannel m;
+        m.requestId = r.integer<quint64>(key::kRequestId, "requestId");
+        m.channelId = r.integer<quint32>(key::kReqChannel, "channelId");
+        m.password = r.secret(key::kReqPassword, "password", false);
+        message = m;
+        break;
+    }
+    case MessageType::CreateChannel: {
+        CreateChannel m;
+        m.requestId = r.integer<quint64>(key::kRequestId, "requestId");
+        m.parentId = r.integer<quint32>(key::kCreateParent, "parentId");
+        m.name = r.name(key::kCreateName, "name", kMaxChannelNameLength);
+        m.topic = r.plainText(key::kCreateTopic, "topic", kMaxTopicLength, false);
+        m.persistent = r.boolean(key::kCreatePersistent, "persistent", false);
+        m.password = r.secret(key::kCreatePassword, "password", false);
+        m.maxUsers = r.optionalInteger<quint16>(key::kCreateMaxUsers, "maxUsers").value_or(0);
+        message = m;
+        break;
+    }
+    case MessageType::DeleteChannel:
+        message = DeleteChannel{r.integer<quint64>(key::kRequestId, "requestId"),
+                                r.integer<quint32>(key::kReqChannel, "channelId")};
+        break;
+    case MessageType::RequestDone:
+        message = RequestDone{r.integer<quint64>(key::kRequestId, "requestId"),
+                              r.optionalInteger<quint32>(key::kDoneResult, "resultId")};
+        break;
+    case MessageType::UserJoined:
+        message = UserJoined{readUser(r)};
+        break;
+    case MessageType::UserLeft:
+        message = UserLeft{r.integer<quint32>(key::kSubjectId, "userId")};
+        break;
+    case MessageType::UserMoved:
+        message = UserMoved{r.integer<quint32>(key::kSubjectId, "userId"),
+                            r.integer<quint32>(key::kMovedChannel, "channelId")};
+        break;
+    case MessageType::SendText: {
+        SendText m;
+        m.requestId = r.integer<quint64>(key::kRequestId, "requestId");
+        m.target = r.enumeration<TextTarget>(key::kSendTarget, "target", TextTarget::Server);
+        m.targetId = r.integer<quint32>(key::kSendTargetId, "targetId");
+        m.text = r.chatText(key::kSendText, "text");
+        message = m;
+        break;
+    }
+    case MessageType::TextMessage: {
+        TextMessage m;
+        m.target = r.enumeration<TextTarget>(key::kMsgTarget, "target", TextTarget::Server);
+        m.fromUserId = r.integer<quint32>(key::kMsgFrom, "fromUserId");
+        m.targetId = r.integer<quint32>(key::kMsgTargetId, "targetId");
+        m.text = r.chatText(key::kMsgText, "text");
+        m.timestampMs = r.integer<qint64>(key::kMsgTime, "timestamp");
+        message = m;
+        break;
+    }
+    case MessageType::AudioSetup: {
+        AudioSetup m;
+        m.udpPort = r.integer<quint16>(key::kAudioUdpPort, "udpPort");
+        m.udpSessionId = r.integer<quint32>(key::kAudioUdpSession, "udpSessionId");
+        m.clientToServerKey = r.bytes(key::kAudioClientKey, "clientToServerKey", kAudioKeyBytes, kAudioKeyBytes);
+        m.serverToClientKey = r.bytes(key::kAudioServerKey, "serverToClientKey", kAudioKeyBytes, kAudioKeyBytes);
+        m.maxBitrate = r.integer<quint32>(key::kAudioMaxBitrate, "maxBitrate");
+        message = m;
+        break;
+    }
+    case MessageType::AudioData: {
+        AudioData m;
+        m.stream = r.enumeration<AudioStream>(key::kDataStream, "stream", AudioStream::SystemAudio);
+        m.sequence = r.integer<quint16>(key::kDataSequence, "sequence");
+        m.payload = r.bytes(key::kDataPayload, "payload", 1, kMaxAudioPayloadBytes);
+        m.userId = r.optionalInteger<quint32>(key::kDataUser, "userId").value_or(0);
+        message = m;
+        break;
+    }
+    default:
+        message = detail::decodeAdmin(static_cast<MessageType>(type), r);
+        break;
+    }
+    if (!r.ok()) {
+        return malformed(r.failure());
+    }
+    return message;
+}
+
+QString toString(ErrorCode code)
+{
+    switch (code) {
+    case ErrorCode::None:
+        return QStringLiteral("None");
+    case ErrorCode::ProtocolViolation:
+        return QStringLiteral("ProtocolViolation");
+    case ErrorCode::UnsupportedVersion:
+        return QStringLiteral("UnsupportedVersion");
+    case ErrorCode::UnknownMessage:
+        return QStringLiteral("UnknownMessage");
+    case ErrorCode::MalformedMessage:
+        return QStringLiteral("MalformedMessage");
+    case ErrorCode::RateLimited:
+        return QStringLiteral("RateLimited");
+    case ErrorCode::ServerFull:
+        return QStringLiteral("ServerFull");
+    case ErrorCode::Timeout:
+        return QStringLiteral("Timeout");
+    case ErrorCode::ServerShuttingDown:
+        return QStringLiteral("ServerShuttingDown");
+    case ErrorCode::InternalError:
+        return QStringLiteral("InternalError");
+    case ErrorCode::AuthenticationFailed:
+        return QStringLiteral("AuthenticationFailed");
+    case ErrorCode::NotAuthorized:
+        return QStringLiteral("NotAuthorized");
+    case ErrorCode::NotFound:
+        return QStringLiteral("NotFound");
+    case ErrorCode::ChannelFull:
+        return QStringLiteral("ChannelFull");
+    case ErrorCode::WrongChannelPassword:
+        return QStringLiteral("WrongChannelPassword");
+    case ErrorCode::InvalidRequest:
+        return QStringLiteral("InvalidRequest");
+    case ErrorCode::NameInUse:
+        return QStringLiteral("NameInUse");
+    case ErrorCode::Banned:
+        return QStringLiteral("Banned");
+    case ErrorCode::Kicked:
+        return QStringLiteral("Kicked");
+    case ErrorCode::Muted:
+        return QStringLiteral("Muted");
+    }
+    return QStringLiteral("Unknown");
+}
+
+QString toString(MessageType type)
+{
+    return QStringLiteral("0x%1").arg(static_cast<quint16>(type), 4, 16, QLatin1Char('0'));
+}
+
+} // namespace opentalk::protocol
