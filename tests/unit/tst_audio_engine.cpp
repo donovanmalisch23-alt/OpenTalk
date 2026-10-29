@@ -308,6 +308,28 @@ private slots:
         QVERIFY(!stopped.first().at(0).toString().isEmpty());
     }
 
+    void oneProgramCanBeSharedAlone()
+    {
+        Pair p(TransmitMode::PushToTalk);
+        p.talkerDevice->setLoopback([](qint64 i) { return sine(i, 880.0, 0.3); }, true);
+        p.talkerDevice->setProgramLoopback(
+            [](quint32 processId, qint64 i) { return processId == 42 ? sine(i, 660.0, 0.3) : 0.0f; });
+        QString error;
+        QVERIFY2(p.talker->startProgramAudio(42, &error), qPrintable(error));
+        QVERIFY(p.talker->isSharingSystemAudio());
+        QTRY_VERIFY_WITH_TIMEOUT(p.heard(660.0) > 0.05, 5000);
+        QVERIFY(p.heard(880.0) < 0.005); // only that program
+        QTRY_VERIFY_WITH_TIMEOUT(p.packetsByType[static_cast<std::size_t>(StreamType::SystemAudio)] > 10, 2000);
+        p.talker->stopSystemAudio();
+        QVERIFY(!p.talker->isSharingSystemAudio());
+
+        // Like Windows 10, where one program cannot be captured on its own.
+        p.talkerDevice->setLoopback([](qint64 i) { return sine(i, 880.0, 0.3); }, false);
+        QVERIFY(!p.talker->startProgramAudio(42, &error));
+        QVERIFY(!error.isEmpty());
+        QVERIFY(!p.talker->isSharingSystemAudio());
+    }
+
     void ownSoundIsRemovedWhenItCannotBeLeftOut()
     {
         // Windows 10: the capture holds everything the computer plays, including the

@@ -17,6 +17,7 @@
 #include "opentalk/ui/ConnectDialog.h"
 #include "opentalk/ui/ModerationDialogs.h"
 #include "opentalk/ui/PluginDialogs.h"
+#include "opentalk/ui/RunningPrograms.h"
 #include "opentalk/ui/SettingsDialog.h"
 #include "opentalk/ui/SupportFileDialog.h"
 #include "opentalk/ui/SupportReport.h"
@@ -536,6 +537,45 @@ void MainWindow::toggleSystemAudioSharing()
     updateMediaActions();
 }
 
+void MainWindow::shareProgramAudio()
+{
+    const QList<RunningProgram> programs = m_programListProvider ? m_programListProvider() : runningPrograms();
+    if (programs.isEmpty()) {
+        reportError(tr("Share one program's sound"), tr("No programs with a window are running."));
+        return;
+    }
+    QStringList names;
+    for (const RunningProgram &program : programs) {
+        names.append(program.executable.isEmpty() ? program.title
+                                                  : tr("%1 (%2)").arg(program.title, program.executable));
+    }
+    int index = -1;
+    if (m_programChooser) {
+        index = m_programChooser(names);
+    } else {
+        bool ok = false;
+        const QString chosen = QInputDialog::getItem(this, tr("Share one program's sound"), tr("&Program to share:"),
+                                                     names, 0, false, &ok);
+        index = ok ? static_cast<int>(names.indexOf(chosen)) : -1;
+    }
+    if (index < 0 || index >= programs.size()) {
+        return;
+    }
+    const RunningProgram &program = programs.at(index);
+    QString error;
+    if (!m_audio->startProgramAudio(program.processId, &error)) {
+        reportError(tr("Cannot share the program's sound"),
+                    tr("The sound of %1 cannot be shared: %2.").arg(program.title, error));
+    } else {
+        appendHistory(tr("Sharing the sound of %1. Only that program's sound is sent to your channel. To stop, use "
+                         "Audio, Share computer audio (Ctrl+Shift+C).")
+                          .arg(program.title));
+        setStatusText(tr("Sharing the sound of %1.").arg(program.title));
+    }
+    updateVoiceStatus();
+    updateMediaActions();
+}
+
 void MainWindow::updateMediaActions()
 {
     if (m_streamFileAction == nullptr || m_audio == nullptr) {
@@ -554,6 +594,8 @@ void MainWindow::updateMediaActions()
     m_shareSystemAudioAction->setVisible(m_audio->canShareSystemAudio());
     m_shareSystemAudioAction->setEnabled(allowed || sharing);
     m_shareSystemAudioAction->setChecked(sharing);
+    m_shareProgramAudioAction->setVisible(m_audio->canShareSystemAudio());
+    m_shareProgramAudioAction->setEnabled(allowed && !sharing);
     m_muteIncomingMediaAction->setChecked(m_settings.value(storage::client::kMuteIncomingMedia).toBool() &&
                                           m_settings.value(storage::client::kMuteIncomingSystemAudio).toBool());
 }
@@ -829,6 +871,8 @@ void MainWindow::buildMenus()
         audioMenu->addAction(tr("Share &computer audio"), this, &MainWindow::toggleSystemAudioSharing);
     m_shareSystemAudioAction->setCheckable(true);
     m_shareSystemAudioAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+    m_shareProgramAudioAction =
+        audioMenu->addAction(tr("Share one pro&gram's sound..."), this, &MainWindow::shareProgramAudio);
     m_muteIncomingMediaAction = audioMenu->addAction(tr("M&ute files and computer audio from others"), this, [this] {
         const bool mute = m_muteIncomingMediaAction->isChecked();
         m_settings.setValue(storage::client::kMuteIncomingMedia, mute);
@@ -845,6 +889,7 @@ void MainWindow::buildMenus()
                                                    {m_stopMediaAction, "stopMediaAction"},
                                                    {m_mediaStatusAction, "mediaStatusAction"},
                                                    {m_shareSystemAudioAction, "shareSystemAudioAction"},
+                                                   {m_shareProgramAudioAction, "shareProgramAudioAction"},
                                                    {m_muteIncomingMediaAction, "muteIncomingMediaAction"}}) {
         action->setObjectName(QLatin1String(name));
     }

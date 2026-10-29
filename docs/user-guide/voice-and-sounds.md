@@ -86,6 +86,10 @@ Others hear it labelled as a file, not as you talking. Settings, Voice Effects a
 - **On Windows 11** OpenTalk leaves its own sound out, so other people never hear themselves back.
 - **On Windows 10** Windows cannot leave OpenTalk out. OpenTalk removes its own sound itself, but some of other people's voices, or your screen reader, may still come through; OpenTalk warns you when sharing starts. To avoid this completely, choose a different device for OpenTalk in Settings, Audio, "Speakers or headphones" (for example a headset), and play what you want to share on your main speakers.
 
+### Sharing one program's sound
+
+Audio menu, "Share one program's sound", lists the programs that have a window. Choose one, and only its sound is sent: not your screen reader, notifications or other people's voices. Ctrl+Shift+C stops it, as for all computer audio. It needs Windows 11; on Windows 10 OpenTalk says it cannot be done.
+
 The same permission as for files applies.
 
 ## Devices

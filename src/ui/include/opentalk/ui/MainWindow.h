@@ -42,6 +42,7 @@ class AnnouncementQueue;
 class AudioController;
 class ChannelTree;
 class SupportFileDialog;
+struct RunningProgram;
 
 /// The primary window: channel tree (with the users in each channel), online users,
 /// conversation history, message input and status bar.
@@ -129,6 +130,14 @@ public:
     {
         m_settingsFileChooser = std::move(chooser);
     }
+    /// Replace the list of running programs, and choosing one of them (tests).
+    void setProgramListProvider(std::function<QList<RunningProgram>()> provider)
+    {
+        m_programListProvider = std::move(provider);
+    }
+    void setProgramChooser(std::function<int(const QStringList &)> chooser) { m_programChooser = std::move(chooser); }
+    /// Audio, "Share one program's sound": asks which program, then shares only its sound.
+    void shareProgramAudio();
     /// Called with the support-file dialog instead of showing it (tests).
     void setSupportDialogHook(std::function<void(SupportFileDialog &)> hook) { m_supportDialogHook = std::move(hook); }
     /// The text of a support file (Help, Create a support file).
@@ -237,6 +246,8 @@ private:
     std::function<QString()> m_mediaFileChooser;
     std::function<QString(bool)> m_settingsFileChooser;
     std::function<void(SupportFileDialog &)> m_supportDialogHook;
+    std::function<QList<RunningProgram>()> m_programListProvider;
+    std::function<int(const QStringList &)> m_programChooser;
     std::unique_ptr<storage::CredentialStore> m_credentials;
     AnnouncementQueue *m_announcements = nullptr;
     QTimer m_refreshTimer;
@@ -270,6 +281,7 @@ private:
     QAction *m_stopMediaAction = nullptr;
     QAction *m_mediaStatusAction = nullptr;
     QAction *m_shareSystemAudioAction = nullptr;
+    QAction *m_shareProgramAudioAction = nullptr;
     QAction *m_muteIncomingMediaAction = nullptr;
     QAction *m_userVolumeAction = nullptr;
     QAction *m_editChannelAction = nullptr;

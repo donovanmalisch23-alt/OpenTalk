@@ -19,6 +19,7 @@
 #include "opentalk/ui/AudioController.h"
 #include "opentalk/ui/ChannelTree.h"
 #include "opentalk/ui/MainWindow.h"
+#include "opentalk/ui/RunningPrograms.h"
 
 #include <QAction>
 #include <QDataStream>
@@ -130,6 +131,9 @@ private:
         auto backend = std::make_unique<audio::SyntheticAudioBackend>();
         if (loopback != Loopback::None) {
             backend->setLoopback([](qint64 i) { return test::sine(i, 880.0, 0.3); }, loopback == Loopback::Excluding);
+            // "Program 42" plays a 660 Hz tone; nothing else plays anything on its own.
+            backend->setProgramLoopback(
+                [](quint32 processId, qint64 i) { return processId == 42 ? test::sine(i, 660.0, 0.3) : 0.0f; });
         }
         app->window = std::make_unique<ui::MainWindow>(*app->settings, *app->paths, *app->profiles, std::move(backend));
         App *raw = app.get();
@@ -314,6 +318,44 @@ private slots:
         QVERIFY(!share->isChecked());
         QVERIFY(alice->history().contains(QStringLiteral("Stopped sharing computer audio.")));
         QTRY_VERIFY_WITH_TIMEOUT(bob->heard(880.0) < 0.005, kWaitMs);
+    }
+
+    void sharingOneProgramSendsOnlyItsSound()
+    {
+        auto alice = login(QStringLiteral("alice"), false, Loopback::Excluding); // like Windows 11
+        auto bob = login(QStringLiteral("bob"));
+        QVERIFY(alice && bob);
+        QStringList offered;
+        alice->window->setProgramListProvider([] {
+            return QList<ui::RunningProgram>{{42, QStringLiteral("Music player"), QStringLiteral("player.exe")},
+                                             {7, QStringLiteral("Editor"), QString()}};
+        });
+        alice->window->setProgramChooser([&offered](const QStringList &names) {
+            offered = names;
+            return static_cast<int>(names.indexOf(QStringLiteral("Music player (player.exe)")));
+        });
+        QAction *shareProgram = alice->action("shareProgramAudioAction");
+        QVERIFY(shareProgram->isVisible() && shareProgram->isEnabled());
+        shareProgram->trigger();
+        QVERIFY2(alice->errors.isEmpty(), qPrintable(alice->errors.join(QLatin1Char('\n'))));
+        QCOMPARE(offered, QStringList({QStringLiteral("Music player (player.exe)"), QStringLiteral("Editor")}));
+        QVERIFY(alice->history().contains(QStringLiteral("Sharing the sound of Music player.")));
+        QTRY_VERIFY_WITH_TIMEOUT(bob->heard(660.0) > 0.05, kWaitMs);
+        QVERIFY(bob->heard(880.0) < 0.005); // the rest of the computer's sound is not sent
+        QVERIFY(alice->action("shareSystemAudioAction")->isChecked());
+        QVERIFY(!shareProgram->isEnabled());
+        // Ctrl+Shift+C stops it, as for all computer audio.
+        alice->action("shareSystemAudioAction")->trigger();
+        QVERIFY(!alice->window->audio().isSharingSystemAudio());
+        QTRY_VERIFY_WITH_TIMEOUT(bob->heard(660.0) < 0.005, kWaitMs);
+
+        // Choosing nothing does nothing; a program that cannot be shared is explained.
+        alice->window->setProgramChooser([](const QStringList &) { return -1; });
+        shareProgram->trigger();
+        QVERIFY(!alice->window->audio().isSharingSystemAudio());
+        alice->window->setProgramListProvider([] { return QList<ui::RunningProgram>{}; });
+        shareProgram->trigger();
+        QVERIFY(alice->errors.join(QLatin1Char(' ')).contains(QStringLiteral("No programs with a window")));
     }
 
     void sharingIsQuietAboutWhatWorks()

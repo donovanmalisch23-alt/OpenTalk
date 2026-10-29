@@ -113,6 +113,21 @@ public:
         return true;
     }
 
+    bool startProgramAudio(quint32 processId, QString *errorMessage)
+    {
+        stopSystemAudio();
+        if (!m_backend.supportsLoopback()) {
+            *errorMessage = QStringLiteral("sharing computer audio is not supported on this system");
+            return false;
+        }
+        m_loopback.clear();
+        if (!m_backend.startProgramLoopback(m_loopback, processId, errorMessage)) {
+            return false;
+        }
+        m_engine.m_sharingSystemAudio = true;
+        return true;
+    }
+
     void stopSystemAudio()
     {
         m_backend.stopLoopback();
@@ -670,6 +685,18 @@ bool AudioEngine::startSystemAudio(QString *errorMessage, bool *excludesOwnSound
     }
     if (excludesOwnSound != nullptr) {
         *excludesOwnSound = excludes;
+    }
+    return ok;
+}
+
+bool AudioEngine::startProgramAudio(quint32 processId, QString *errorMessage)
+{
+    bool ok = false;
+    QString error;
+    QMetaObject::invokeMethod(
+        m_worker, [&] { ok = m_worker->startProgramAudio(processId, &error); }, Qt::BlockingQueuedConnection);
+    if (errorMessage != nullptr) {
+        *errorMessage = error;
     }
     return ok;
 }

@@ -10,6 +10,7 @@ add_library(opentalk_ui STATIC
     include/opentalk/ui/ModerationDialogs.h
     include/opentalk/ui/PluginDialogs.h
     include/opentalk/ui/PushToTalkMonitor.h
+    include/opentalk/ui/RunningPrograms.h
     include/opentalk/ui/SettingsDialog.h
     include/opentalk/ui/SupportFileDialog.h
     include/opentalk/ui/SupportReport.h
@@ -25,6 +26,7 @@ add_library(opentalk_ui STATIC
     RequestTracker.h
     UiHelpers.h
     PushToTalkMonitor.cpp
+    RunningPrograms.cpp
     SettingsDialog.cpp
     SupportFileDialog.cpp
     SupportReport.cpp)

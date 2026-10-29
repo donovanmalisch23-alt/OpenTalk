@@ -21,6 +21,8 @@ struct SyntheticAudioBackend::Impl {
     bool canExclude = false;
     RingBuffer *loopbackRing = nullptr; ///< Guarded by mutex
     bool loopbackIncludesOwn = false;
+    std::function<float(quint32, qint64)> programGenerator;
+    quint32 loopbackProgram = 0; ///< Non-zero while capturing one program.
     std::atomic<bool> loopbackFailed{false};
 };
 
@@ -73,8 +75,10 @@ bool SyntheticAudioBackend::start(const QString &, const QString &, RingBuffer &
                     std::vector<float> system(buffer.size());
                     const qint64 first = d->sampleIndex - static_cast<qint64>(buffer.size());
                     for (std::size_t i = 0; i < system.size(); ++i) {
-                        system[i] = d->loopbackGenerator(first + static_cast<qint64>(i)) +
-                                    (d->loopbackIncludesOwn ? buffer[i] : 0.0f);
+                        const qint64 index = first + static_cast<qint64>(i);
+                        system[i] = d->loopbackProgram != 0
+                                        ? d->programGenerator(d->loopbackProgram, index)
+                                        : d->loopbackGenerator(index) + (d->loopbackIncludesOwn ? buffer[i] : 0.0f);
                     }
                     d->loopbackRing->write(system.data(), system.size());
                 }
@@ -144,6 +148,29 @@ bool SyntheticAudioBackend::startLoopback(RingBuffer &ring, bool excludeOwnProce
     }
     d->loopbackRing = &ring;
     d->loopbackIncludesOwn = !excludeOwnProcess;
+    d->loopbackProgram = 0;
+    d->loopbackFailed = false;
+    return true;
+}
+
+void SyntheticAudioBackend::setProgramLoopback(std::function<float(quint32, qint64)> generator)
+{
+    std::lock_guard lock(d->mutex);
+    d->programGenerator = std::move(generator);
+}
+
+bool SyntheticAudioBackend::startProgramLoopback(RingBuffer &ring, quint32 processId, QString *errorMessage)
+{
+    std::lock_guard lock(d->mutex);
+    if (!d->programGenerator || !d->canExclude || processId == 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("not supported by this synthetic device");
+        }
+        return false;
+    }
+    d->loopbackRing = &ring;
+    d->loopbackIncludesOwn = false;
+    d->loopbackProgram = processId;
     d->loopbackFailed = false;
     return true;
 }
@@ -152,6 +179,7 @@ void SyntheticAudioBackend::stopLoopback()
 {
     std::lock_guard lock(d->mutex);
     d->loopbackRing = nullptr;
+    d->loopbackProgram = 0;
 }
 
 bool SyntheticAudioBackend::hasLoopbackFailed() const

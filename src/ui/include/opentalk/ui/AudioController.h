@@ -57,6 +57,10 @@ public:
     void skipMedia(qint64 deltaMs) { m_engine->skipMedia(deltaMs); }
     audio::MediaStatus mediaStatus() const { return m_engine->mediaStatus(); }
     bool canShareSystemAudio() const { return m_engine->canShareSystemAudio(); }
+    bool startProgramAudio(quint32 processId, QString *errorMessage)
+    {
+        return m_engine->startProgramAudio(processId, errorMessage);
+    }
     bool startSystemAudio(QString *errorMessage, bool *excludesOwnSound)
     {
         return m_engine->startSystemAudio(errorMessage, excludesOwnSound);

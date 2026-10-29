@@ -53,6 +53,18 @@ public:
         }
         return false;
     }
+    /// Captures only what one program (and the programs it started) plays, for sharing
+    /// that program's sound. Needs the same Windows support as `excludeOwnProcess`.
+    /// Stopped with stopLoopback().
+    virtual bool startProgramLoopback(RingBuffer &ring, quint32 processId, QString *errorMessage)
+    {
+        Q_UNUSED(ring);
+        Q_UNUSED(processId);
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("sharing one program's sound is not supported on this system");
+        }
+        return false;
+    }
     virtual void stopLoopback() {}
     /// True once the loopback capture stopped by itself (for example its device went away).
     virtual bool hasLoopbackFailed() const { return false; }
@@ -88,6 +100,10 @@ public:
     void setLoopback(std::function<float(qint64)> generator, bool canExcludeOwnProcess);
     bool supportsLoopback() const override;
     bool startLoopback(RingBuffer &ring, bool excludeOwnProcess, QString *errorMessage) override;
+    /// Makes "one program's sound" available (when `canExcludeOwnProcess` was given to
+    /// setLoopback()): `generator(processId, sample)` is what that program plays.
+    void setProgramLoopback(std::function<float(quint32, qint64)> generator);
+    bool startProgramLoopback(RingBuffer &ring, quint32 processId, QString *errorMessage) override;
     void stopLoopback() override;
     bool hasLoopbackFailed() const override;
     /// Simulates the shared device going away while computer audio is being captured.

@@ -122,6 +122,9 @@ public:
     /// removes OpenTalk's own sound with echo cancellation; `excludesOwnSound` tells
     /// which, so the user can be warned that some of it may come through.
     bool startSystemAudio(QString *errorMessage, bool *excludesOwnSound = nullptr);
+    /// Starts sending only what one program plays (identified by its process ID), sent
+    /// as computer audio. OpenTalk's own sound is never part of it. Needs Windows 11.
+    bool startProgramAudio(quint32 processId, QString *errorMessage);
     void stopSystemAudio();
     bool isSharingSystemAudio() const { return m_sharingSystemAudio.load(); }
 

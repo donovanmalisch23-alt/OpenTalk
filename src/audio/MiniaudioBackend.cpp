@@ -175,6 +175,37 @@ public:
     bool startLoopback(RingBuffer &ring, bool excludeOwnProcess, QString *errorMessage) override
     {
 #ifdef Q_OS_WIN
+        return openLoopback(ring, excludeOwnProcess ? GetCurrentProcessId() : 0, excludeOwnProcess,
+                            excludeOwnProcess ? QStringLiteral("leaving OpenTalk's own sound out of shared computer "
+                                                               "audio needs Windows 11")
+                                              : QStringLiteral("computer audio could not be captured"),
+                            errorMessage);
+#else
+        return AudioBackend::startLoopback(ring, excludeOwnProcess, errorMessage);
+#endif
+    }
+
+    bool startProgramLoopback(RingBuffer &ring, quint32 processId, QString *errorMessage) override
+    {
+#ifdef Q_OS_WIN
+        if (processId == 0 || processId == GetCurrentProcessId()) {
+            setError(errorMessage, QStringLiteral("that program cannot be shared"));
+            return false;
+        }
+        return openLoopback(ring, processId, false,
+                            QStringLiteral("sharing one program's sound needs Windows 11, and the program must "
+                                           "still be running"),
+                            errorMessage);
+#else
+        return AudioBackend::startProgramLoopback(ring, processId, errorMessage);
+#endif
+    }
+
+#ifdef Q_OS_WIN
+    /// Opens loopback capture: everything (processId 0), everything except one process
+    /// (`exclude`), or only one process and its children.
+    bool openLoopback(RingBuffer &ring, DWORD processId, bool exclude, const QString &initError, QString *errorMessage)
+    {
         stopLoopback();
         m_loopbackRing = &ring;
         m_loopbackFailed = false;
@@ -194,19 +225,16 @@ public:
         config.dataCallback = &MiniaudioBackend::loopbackCallback;
         config.notificationCallback = &MiniaudioBackend::loopbackNotificationCallback;
         config.pUserData = this;
-        if (excludeOwnProcess) {
-            config.wasapi.loopbackProcessID = GetCurrentProcessId();
-            config.wasapi.loopbackProcessExclude = MA_TRUE;
+        if (processId != 0) {
+            config.wasapi.loopbackProcessID = processId;
+            config.wasapi.loopbackProcessExclude = exclude ? MA_TRUE : MA_FALSE;
         }
         m_loopbackDevice = std::make_unique<ma_device>();
         m_stoppingLoopback = false;
         if (ma_device_init(m_loopbackContext.get(), &config, m_loopbackDevice.get()) != MA_SUCCESS) {
             m_loopbackDevice.reset();
             stopLoopback();
-            setError(errorMessage, excludeOwnProcess
-                                       ? QStringLiteral("leaving OpenTalk's own sound out of shared computer audio "
-                                                        "needs Windows 11")
-                                       : QStringLiteral("computer audio could not be captured"));
+            setError(errorMessage, initError);
             return false;
         }
         if (ma_device_start(m_loopbackDevice.get()) != MA_SUCCESS) {
@@ -215,10 +243,8 @@ public:
             return false;
         }
         return true;
-#else
-        return AudioBackend::startLoopback(ring, excludeOwnProcess, errorMessage);
-#endif
     }
+#endif
 
     void stopLoopback() override
     {

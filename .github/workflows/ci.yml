@@ -67,6 +67,9 @@ jobs:
         run: cmake --build --preset windows-msvc-release
 
       - name: Test
+        env:
+          # Without a console, Qt sends warnings to the debugger; this keeps them in the log.
+          QT_FORCE_STDERR_LOGGING: "1"
         run: ctest --preset windows-msvc-release
 
       - name: Show the complete output of failed tests

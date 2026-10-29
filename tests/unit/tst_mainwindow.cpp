@@ -241,19 +241,28 @@ private slots:
     {
         ui::SupportReportInput input;
         input.version = QStringLiteral("1.2.3");
-        input.homeFolder = QStringLiteral("/home/alice");
         input.dataMode = QStringLiteral("installed");
-        input.dataFolder = QStringLiteral("/home/alice/.local/share/OpenTalk");
         input.settings = {{QStringLiteral("media/lastFolder"), QStringLiteral("(left out)")}};
+#ifdef Q_OS_WIN
+        // Qt spells it with forward slashes; logs and folders use backslashes, in any case.
+        input.homeFolder = QStringLiteral("C:/Users/alice");
+        input.dataFolder = QStringLiteral("C:\\Users\\alice\\AppData\\Roaming\\OpenTalk");
+        input.log = QStringLiteral("line one\nopened C:\\Users\\Alice\\Music\\song.mp3");
+        const QString hiddenLog = QStringLiteral("opened %USERPROFILE%\\Music\\song.mp3");
+#else
+        input.homeFolder = QStringLiteral("/home/alice");
+        input.dataFolder = QStringLiteral("/home/alice/.local/share/OpenTalk");
         input.log = QStringLiteral("line one\nopened /home/alice/music/song.mp3");
+        const QString hiddenLog = QStringLiteral("opened ~/music/song.mp3");
+#endif
         const QString report =
             ui::buildSupportReport(input, QDateTime(QDate(2026, 10, 29), QTime(12, 30), QTimeZone::utc()));
         QVERIFY(report.contains(QStringLiteral("Created: 2026-10-29 12:30 UTC")));
         QVERIFY(report.contains(QStringLiteral("Version: 1.2.3")));
         QVERIFY(report.contains(QStringLiteral("media/lastFolder = (left out)")));
         QVERIFY(report.contains(QStringLiteral("Plugins ==\nInstalled: none")));
-        QVERIFY(!report.contains(QStringLiteral("alice")));
-        QVERIFY(report.contains(QStringLiteral("opened ~/music/song.mp3")));
+        QVERIFY(!report.contains(QStringLiteral("alice"), Qt::CaseInsensitive));
+        QVERIFY2(report.contains(hiddenLog), qPrintable(report));
     }
 
     void logTailKeepsTheLastLines()
@@ -305,8 +314,9 @@ private slots:
         QVERIFY(!shown.contains(QStringLiteral("SecretAdminName")));
         QVERIFY(!shown.contains(QStringLiteral("Bobby Tables")));
         QVERIFY(saved.startsWith(QStringLiteral("Saved as")));
+        // Saved with the platform's line endings (CRLF on Windows, for older editors).
         QFile file(target);
-        QVERIFY(file.open(QIODevice::ReadOnly));
+        QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
         QCOMPARE(QString::fromUtf8(file.readAll()), shown);
     }
 

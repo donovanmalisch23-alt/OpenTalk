@@ -127,3 +127,9 @@ Two copies of OpenTalk, both logged in to your server as registered users (guest
 | 72 | Ctrl+Shift+X. | "Stopped streaming *name*." The other copy's tree no longer describes you as playing a file. |
 | 73 | Windows 11: play something in another program, then Ctrl+Shift+C. | "Sharing computer audio." The other copy hears the program but not its own voice coming back when it talks. Ctrl+Shift+C again: "Stopped sharing computer audio." |
 | 74 | Windows 10: Ctrl+Shift+C. | A warning is read: Windows cannot leave OpenTalk's own sound out, some voices may still be heard, and how to avoid it. Ask the other person whether they hear themselves; record the answer. |
+| 75 | Ctrl+Shift+S, type "back soon", Enter. | "Your status is now: back soon." The other copy says "*name*'s status: back soon", and its channel list reads "*name*, status: back soon". |
+| 76 | Ctrl+Shift+S, delete the text, Enter. | The other copy says "*name* cleared their status." |
+| 77 | Windows 11: start a music player, then Audio (Alt+A), "Share one program's sound". | A list of programs with windows is read; choose the player with the arrow keys and Enter. "Sharing the sound of *title*." The other copy hears only the player. Ctrl+Shift+C stops it. |
+| 78 | Help (Alt+H), "Create a support file". | The dialog opens in "Support information"; the arrow keys read it line by line. Tab reaches "Save to a file", "Copy all" and "Close". After saving, "Saved as *path*" is spoken. |
+| 79 | File (Alt+F), "Export settings", and save. Change any setting. File, "Import settings", and choose the saved file. | "Settings imported: 1 changed." is spoken, and the setting is back as it was. |
+| 80 | Start `OpenTalk.exe` a second time. | A message says OpenTalk is already running with this data folder. Enter closes it; the first copy is unaffected. |

@@ -103,7 +103,7 @@ People can host a server from the app or run `opentalk-server` on its own. Then 
 | Voice with real microphones and speakers on Windows | **Not yet verified** | Needs `opentalk-audio-bench device-loopback` and a listening test |
 | All tests under AddressSanitizer and UBSan | Passing (41 test programs) | `linux-asan` preset in CI. UBSan found a shutdown-order bug in the main window, now fixed |
 | Portable Windows zip | Built and smoke-tested in CI | With only Windows on `PATH`, the smoke test generates a certificate, logs in, runs the Opus benchmark and sends voice through a server |
-| NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 74 steps |
+| NVDA behaviour | **Not yet verified** | [Test script](accessibility/nvda-test-script.md), now 80 steps |
 | Ctrl+C shutdown of `opentalk-server` in a Windows console | **Not yet verified manually** | Shutdown when the app closes the server's input is tested on Windows CI |
 
 ## Known limitations
@@ -140,7 +140,7 @@ Windows results come from the CI runs linked on the pull request.
 
 ## Open items for the owner
 
-1. Run the [NVDA test script](accessibility/nvda-test-script.md) on the portable zip. Steps 19–30 cover hosting, joining and chatting; steps 33–43 cover voice; steps 46–57 cover moderation; steps 58–64 cover plugins; steps 65–74 cover voice processing, files and computer audio.
+1. Run the [NVDA test script](accessibility/nvda-test-script.md) on the portable zip. Steps 19–30 cover hosting, joining and chatting; steps 33–43 cover voice; steps 46–57 cover moderation; steps 58–64 cover plugins; steps 65–74 cover voice processing, files and computer audio; steps 75–80 cover status messages, sharing one program, the support file, moving settings and a second copy.
 2. With headphones (or a cable from output to input), try voice with a second person and run `opentalk-audio-bench device-loopback`; please record the result in an issue.
 3. Switch the repository's default branch to `main` (Settings → General → Default branch).
 4. Paste the repository description and enable private vulnerability reporting (Settings → Security).
