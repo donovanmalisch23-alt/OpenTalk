@@ -149,7 +149,7 @@ Full regression; NVDA validation; upgrade testing; user, admin and plugin guides
 - **Remaining requirement gaps:** status messages (F-PRES-1), a support file the user reviews (F-DIAG-1), settings export and import (F-CFG-1), one copy per data folder and a note after an unexpected exit.
 - **Release pipeline:** a version tag publishes the tested portable zip and installer, with checksums and build provenance ([how](development/releasing.md)).
 - **Release notes** and the [acceptance checklist](release-notes/1.0.0-rc.1-acceptance.md), which lists each requirement with its evidence and gaps.
-- **Regression:** all test programs on Windows and Linux, under AddressSanitizer, clang-tidy, CodeQL and fuzzing. Fuzzing found and the project fixed an out-of-bounds read in miniaudio's FLAC seeking.
+- **Regression:** all test programs on Windows and Linux, under AddressSanitizer, clang-tidy, CodeQL and fuzzing. Fuzzing found, and the project patched, an out-of-bounds read in miniaudio's FLAC seeking and a hang in its WAV reader.
 - **Upgrades:** settings and server databases from earlier development builds are upgraded automatically, with a backup first (`tst_settingsstore`, `tst_serverdatabase`).
 
 **Not done (needs a person with Windows):** the NVDA pass and tests with real sound hardware. These decide whether 1.0.0 follows or another release candidate.

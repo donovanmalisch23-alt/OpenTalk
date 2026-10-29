@@ -1,0 +1,22 @@
+OpenTalk's patch to miniaudio 0.11.25 (dr_wav): refuse a "fmt " chunk whose size is smaller
+than what was already read, or too large to seek over, instead of seeking backwards and
+re-reading chunks forever. Found by fuzzing (tests/fuzz/fuzz_media_decoder); regression test:
+tst_media_file, refusesAWavFileThatWouldHang. Recorded in docs/licensing/third-party-register.md.
+Apply after opentalk-flac-seek.patch:
+    patch -p1 -d third_party/miniaudio < third_party/miniaudio/opentalk-wav-fmt-chunk.patch
+
+--- a/miniaudio.h
++++ b/miniaudio.h
+@@ -81408,6 +81408,12 @@
+                     cursor += fmt.extendedSize;
+                     bytesReadSoFar += fmt.extendedSize;
+                 }
++                /* OpenTalk patch (see third_party/miniaudio/opentalk-wav-fmt-chunk.patch): a chunk size
++                   smaller than what was read, or too large for an int, made this seek go backwards and
++                   the chunk loop never end (found by fuzzing). Such a file is damaged. */
++                if (header.sizeInBytes < (ma_uint64)bytesReadSoFar || header.sizeInBytes - (ma_uint64)bytesReadSoFar > 0x7FFFFFFF) {
++                    return MA_FALSE;
++                }
+                 if (pWav->onSeek(pWav->pUserData, (int)(header.sizeInBytes - bytesReadSoFar), MA_DR_WAV_SEEK_CUR) == MA_FALSE) {
+                     return MA_FALSE;
+                 }

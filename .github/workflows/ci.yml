@@ -296,7 +296,9 @@ jobs:
             mkdir -p "corpus/$target"
             if [ -d "tests/fuzz/seeds/$target" ]; then cp tests/fuzz/seeds/$target/* "corpus/$target/"; fi
             echo "::group::fuzz_$target"
-            "build/linux-fuzz/tests/fuzz/fuzz_$target" -max_total_time=60 -artifact_prefix="artifacts/$target-" "corpus/$target"
+            # -timeout: an input that takes longer than 30 seconds is reported as a hang.
+            "build/linux-fuzz/tests/fuzz/fuzz_$target" -max_total_time=60 -timeout=30 -artifact_prefix="artifacts/$target-" \
+              "corpus/$target"
             echo "::endgroup::"
           done
 

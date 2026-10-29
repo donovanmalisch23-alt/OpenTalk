@@ -3,7 +3,7 @@
 # Depends only on QtCore, Opus and miniaudio, so it can be reused by bots and tools.
 
 # miniaudio is third-party code compiled without our warning flags. It is as published
-# except for third_party/miniaudio/opentalk-flac-seek.patch (see the third-party register).
+# except for the patches in third_party/miniaudio/*.patch (see the third-party register).
 add_library(opentalk_miniaudio STATIC miniaudio_impl.c)
 target_include_directories(opentalk_miniaudio SYSTEM PUBLIC ${PROJECT_SOURCE_DIR}/third_party/miniaudio)
 if(UNIX)

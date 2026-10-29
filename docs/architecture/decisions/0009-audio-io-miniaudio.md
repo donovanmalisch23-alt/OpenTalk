@@ -14,7 +14,7 @@
 **Decision:** Option 3, behind OpenTalk's own `AudioBackend` interface, so a raw WASAPI backend can be added later if measurements demand it.
 
 - **Version:** miniaudio 0.11.25, vendored in `third_party/miniaudio` with its licence. Its SHA-256 is in the [third-party register](../../licensing/third-party-register.md).
-- **Amendment (October 2026):** fuzzing found an out-of-bounds read in miniaudio's FLAC seeking. The vendored copy carries a small patch for it (`third_party/miniaudio/opentalk-flac-seek.patch`), recorded in the register, until upstream fixes it. Any other change to the vendored file needs the same: a patch file, a register entry and a test.
+- **Amendment (October 2026):** fuzzing found an out-of-bounds read in miniaudio's FLAC seeking and a hang in its WAV reader. The vendored copy carries a small patch for each (`third_party/miniaudio/opentalk-flac-seek.patch` and `opentalk-wav-fmt-chunk.patch`), recorded in the register, until upstream fixes them. Any other change to the vendored file needs the same: a patch file, a register entry and a test.
 - **Opus** (libopus, BSD-3-Clause) is the only codec: 48 kHz mono, 20 ms frames, in-band forward error correction and packet-loss concealment. It comes from vcpkg on Windows and the system on Linux.
 
 **Why:**

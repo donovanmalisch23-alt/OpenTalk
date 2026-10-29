@@ -81408,6 +81408,12 @@ MA_PRIVATE ma_bool32 ma_dr_wav_init__internal(ma_dr_wav* pWav, ma_dr_wav_chunk_p
                     cursor += fmt.extendedSize;
                     bytesReadSoFar += fmt.extendedSize;
                 }
+                /* OpenTalk patch (see third_party/miniaudio/opentalk-wav-fmt-chunk.patch): a chunk size
+                   smaller than what was read, or too large for an int, made this seek go backwards and
+                   the chunk loop never end (found by fuzzing). Such a file is damaged. */
+                if (header.sizeInBytes < (ma_uint64)bytesReadSoFar || header.sizeInBytes - (ma_uint64)bytesReadSoFar > 0x7FFFFFFF) {
+                    return MA_FALSE;
+                }
                 if (pWav->onSeek(pWav->pUserData, (int)(header.sizeInBytes - bytesReadSoFar), MA_DR_WAV_SEEK_CUR) == MA_FALSE) {
                     return MA_FALSE;
                 }

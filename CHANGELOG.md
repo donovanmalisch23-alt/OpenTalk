@@ -62,7 +62,7 @@ The first published version: a release candidate for 1.0.0, with everything buil
 
 ### Fixed
 
-- A damaged FLAC file could make OpenTalk read outside a buffer when seeking (found by fuzzing in miniaudio's FLAC decoder). The vendored miniaudio carries a small patch, recorded in the third-party register.
+- A damaged FLAC file could make OpenTalk read outside a buffer when seeking, and a damaged WAV file could make it hang while opening the file (both found by fuzzing, in miniaudio's decoders). The vendored miniaudio carries a small patch for each, recorded in the third-party register. Fuzzing in CI now also reports any input that takes longer than 30 seconds.
 - The fuzz build now instruments the libraries under test, not only the fuzz harnesses.
 - Restoring a backup twice in the same second could overwrite the file being restored.
 

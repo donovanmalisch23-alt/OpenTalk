@@ -147,6 +147,19 @@ private slots:
         QCOMPARE(file.read(frame), std::size_t{0});
     }
 
+    void refusesAWavFileThatWouldHang()
+    {
+        // Found by fuzzing: a "fmt " chunk size that made miniaudio seek backwards and read
+        // the same chunks forever (patched in third_party/miniaudio). Without the patch this
+        // test never finishes.
+        QFile bytes(QStringLiteral(OPENTALK_MEDIA_SAMPLES "/damaged-wav-fmt-loop.wav"));
+        QVERIFY(bytes.open(QIODevice::ReadOnly));
+        MediaFile file;
+        QString error;
+        QVERIFY(!file.openData(bytes.readAll(), QStringLiteral("damaged"), &error));
+        QVERIFY(error.contains(QStringLiteral("WAV, FLAC or MP3")));
+    }
+
     void refusesWhatItCannotRead()
     {
         QTemporaryDir dir;

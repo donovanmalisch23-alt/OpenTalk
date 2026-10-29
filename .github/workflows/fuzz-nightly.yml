@@ -42,7 +42,7 @@ jobs:
         run: |
           mkdir -p corpus artifacts
           if [ -d "tests/fuzz/seeds/${{ matrix.target }}" ]; then cp -n tests/fuzz/seeds/${{ matrix.target }}/* corpus/; fi
-          build/linux-fuzz/tests/fuzz/fuzz_${{ matrix.target }} -max_total_time=600 -print_final_stats=1 \
+          build/linux-fuzz/tests/fuzz/fuzz_${{ matrix.target }} -max_total_time=600 -timeout=30 -print_final_stats=1 \
             -artifact_prefix=artifacts/ corpus
 
       - name: Save the corpus
