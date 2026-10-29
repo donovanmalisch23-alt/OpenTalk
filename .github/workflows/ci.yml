@@ -7,6 +7,10 @@ on:
     # A version tag (v1.0.0-rc.1) also publishes a GitHub release: see the release job.
     tags: ["v*"]
   pull_request:
+  # A release published on GitHub's website (with a new v* tag) gets the tested files.
+  # If the new tag also started a push run, the concurrency group below keeps only one.
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -389,6 +393,14 @@ jobs:
         run: |
           prerelease=""
           case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" --verify-tag $prerelease \
-            --title "OpenTalk $VERSION" --notes-file "$NOTES" \
-            upload/OpenTalk-*.zip upload/OpenTalk-*.exe upload/SHA256SUMS.txt
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            # The release was made on GitHub's website (which also made the tag): attach the
+            # tested files to it and use the release notes from the repository.
+            gh release upload "$GITHUB_REF_NAME" --clobber \
+              upload/OpenTalk-*.zip upload/OpenTalk-*.exe upload/SHA256SUMS.txt
+            gh release edit "$GITHUB_REF_NAME" $prerelease --title "OpenTalk $VERSION" --notes-file "$NOTES"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag $prerelease \
+              --title "OpenTalk $VERSION" --notes-file "$NOTES" \
+              upload/OpenTalk-*.zip upload/OpenTalk-*.exe upload/SHA256SUMS.txt
+          fi

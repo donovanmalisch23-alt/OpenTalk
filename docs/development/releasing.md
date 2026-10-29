@@ -25,6 +25,8 @@ The `release` job in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml
    ```
 
    The release job checks that the tag matches the version in `CMakeLists.txt` and that the notes file exists, and stops if not.
+
+   **Or on GitHub's website** (no command line needed): Releases, "Draft a new release", type the tag (`v1.0.0-rc.1`) and choose "Create new tag on publish", pick the branch or commit as the target, tick "Set as a pre-release" for a release candidate, and publish. CI then builds and tests that commit and attaches the files and the release notes to the release, in about 25 minutes. Until then the release shows only GitHub's source archives.
 6. **Check the release page:** both files and `SHA256SUMS.txt` are there; download the zip, compare its checksum, and start it on a clean Windows machine.
 
 ## If something goes wrong
