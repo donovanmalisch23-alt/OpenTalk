@@ -12,6 +12,8 @@
 #include <QTest>
 
 #include <array>
+#include <chrono>
+#include <thread>
 
 using namespace opentalk::audio;
 using opentalk::test::sine;
@@ -264,6 +266,26 @@ private slots:
         QString error;
         QVERIFY(!p.talker->startMedia(dir.filePath(QStringLiteral("missing.wav")), &error));
         QVERIFY(!error.isEmpty());
+    }
+
+    void pausingIsNeverUndoneByTheAudioThread()
+    {
+        // Found in CI: the audio thread could publish "playing" just after the window
+        // paused, so the menu kept offering "Pause" and pressing it again paused instead
+        // of resuming. Toggled at many points in the audio thread's 10 ms cycle.
+        QTemporaryDir dir;
+        const QString path = writeToneFile(dir, 30.0, 660.0);
+        Pair p(TransmitMode::PushToTalk);
+        QVERIFY(p.talker->startMedia(path, nullptr));
+        QTRY_VERIFY_WITH_TIMEOUT(p.talker->mediaStatus().positionMs > 100, 3000);
+        bool paused = false;
+        for (int i = 0; i < 400; ++i) {
+            paused = !paused;
+            p.talker->setMediaPaused(paused);
+            std::this_thread::sleep_for(std::chrono::microseconds(250 * (i % 11)));
+            QVERIFY2(p.talker->mediaStatus().paused == paused, qPrintable(QString::number(i)));
+        }
+        p.talker->stopMedia();
     }
 
     void listenersCanMuteMediaButNotVoice()

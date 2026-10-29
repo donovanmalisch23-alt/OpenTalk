@@ -337,7 +337,7 @@ private:
         }
         if (mediaPaused.load()) {
             m_mediaNextMs = now; // carry on from here when resumed, without catching up
-            publishMediaStatus(true);
+            publishMediaStatus();
             return;
         }
         if (now - m_mediaNextMs > kMediaMaxLagMs) {
@@ -368,14 +368,16 @@ private:
                 return;
             }
         }
-        publishMediaStatus(false);
+        publishMediaStatus();
     }
 
-    void publishMediaStatus(bool paused)
+    void publishMediaStatus()
     {
+        // `paused` is read again under the lock: the window may have paused or resumed
+        // since this frame started, and must not see its own request undone.
         QMutexLocker lock(&mutex);
         if (!pendingMedia && !mediaStopRequested) {
-            mediaSnapshot = {true, paused, m_media->title(), m_media->positionMs(), m_media->durationMs()};
+            mediaSnapshot = {true, mediaPaused.load(), m_media->title(), m_media->positionMs(), m_media->durationMs()};
         }
     }
 
